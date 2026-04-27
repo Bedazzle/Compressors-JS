@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UPKR-JS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+        .box { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; border-radius: 4px; }
+        button { padding: 0.5rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+        .controls button, .controls input, .controls select { flex-shrink: 0; }
+        #result { display: none; margin-top: 1rem; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>UPKR-JS</h1>
+
+    <div class="box">
+        <select id="mode" onchange="updateMode()">
+            <option value="compress">Compress</option>
+            <option value="decompress">Decompress</option>
+            <option value="batchCompress">Batch Compress</option>
+            <option value="batchDecompress">Batch Decompress</option>
+        </select><br>
+        <div class="controls">
+            <button id="selectBtn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+            <input type="file" id="fileInput" style="display:none">
+            <span id="fileCount" style="flex:1"></span>
+        </div>
+        <div class="controls">
+            <label>Level: <input type="number" id="level" value="1" min="0" max="9" style="width:50px"></label>
+            <label>Parity: <select id="parity"><option value="1" selected>1</option><option value="2">2</option><option value="4">4</option></select></label>
+            <label><input type="checkbox" id="reverse"> Reverse</label>
+        </div>
+        <div class="controls">
+            <label>Preset: </label>
+            <select id="preset" onchange="applyPreset()">
+                <option value="default">Default</option>
+                <option value="z80">Z80</option>
+                <option value="x86">x86</option>
+                <option value="x86b">x86b</option>
+            </select>
+        </div>
+        <div class="controls">
+            <label><input type="checkbox" id="useBitstream"> Bitstream</label>
+            <label><input type="checkbox" id="bitstreamBE"> Big-endian bitstream</label>
+        </div>
+        <div class="controls">
+            <label><input type="checkbox" id="invertBit"> Invert bit encoding</label>
+            <label><input type="checkbox" id="simplifiedProb"> Simplified prob update</label>
+        </div>
+        <div class="controls">
+            <label><input type="checkbox" id="noRepeatedOffsets"> No repeated offsets</label>
+            <label><input type="checkbox" id="eofInLength"> EOF in length</label>
+        </div>
+        <div class="controls">
+            <label><input type="checkbox" id="invertMatch"> Invert match bit</label>
+            <label><input type="checkbox" id="invertNewOffset"> Invert new-offset bit</label>
+            <label><input type="checkbox" id="invertContinue"> Invert continue bit</label>
+        </div>
+        <div class="controls">
+            <label>Max offset: <input type="number" id="maxOffset" value="0" min="0" style="width:80px"></label>
+            <label>Max length: <input type="number" id="maxLength" value="0" min="0" style="width:80px"></label>
+            <span style="color:#888; font-size:0.85em">0 = unlimited</span>
+        </div>
+        <div class="controls">
+            <button onclick="process()">Go</button>
+        </div>
+    </div>
+
+    <div id="result">
+        <p id="status"></p>
+        <p>Original: <span id="origSize">-</span> &rarr; Result: <span id="resultSize">-</span> (<span id="ratio">-</span>%)</p>
+        <p id="progress"></p>
+        <button onclick="download()">Download</button>
+    </div>
+
+    <script src="upkr-js.js"></script>
+    <script>
+        let lastResult = null;
+        let lastFilename = 'result.bin';
+        let batchZip = null;
+        let batchStartTime = 0;
+
+        const modeSelect = document.getElementById('mode');
+        const selectBtn = document.getElementById('selectBtn');
+        const fileInput = document.getElementById('fileInput');
+        const fileCount = document.getElementById('fileCount');
+
+        function resetConfigUI() {
+            document.getElementById('useBitstream').checked = false;
+            document.getElementById('bitstreamBE').checked = false;
+            document.getElementById('invertBit').checked = false;
+            document.getElementById('simplifiedProb').checked = false;
+            document.getElementById('noRepeatedOffsets').checked = false;
+            document.getElementById('eofInLength').checked = false;
+            document.getElementById('invertMatch').checked = false;
+            document.getElementById('invertNewOffset').checked = false;
+            document.getElementById('invertContinue').checked = false;
+            document.getElementById('parity').value = 1;
+            document.getElementById('maxOffset').value = '0';
+            document.getElementById('maxLength').value = '0';
+        }
+
+        function applyPreset() {
+            const preset = document.getElementById('preset').value;
+            resetConfigUI();
+            if (preset === 'z80') {
+                document.getElementById('useBitstream').checked = true;
+                document.getElementById('bitstreamBE').checked = true;
+                document.getElementById('invertBit').checked = true;
+                document.getElementById('simplifiedProb').checked = true;
+                document.getElementById('level').value = '9';
+            } else if (preset === 'x86') {
+                document.getElementById('useBitstream').checked = true;
+                document.getElementById('invertMatch').checked = true;
+                document.getElementById('invertNewOffset').checked = true;
+                document.getElementById('invertContinue').checked = true;
+            } else if (preset === 'x86b') {
+                document.getElementById('useBitstream').checked = true;
+                document.getElementById('invertContinue').checked = true;
+                document.getElementById('noRepeatedOffsets').checked = true;
+                document.getElementById('level').value = '9';
+            }
+        }
+
+        function getConfig() {
+            const config = UPKR.defaultConfig();
+            config.use_bitstream = document.getElementById('useBitstream').checked;
+            config.bitstream_is_big_endian = document.getElementById('bitstreamBE').checked;
+            config.parity_contexts = parseInt(document.getElementById('parity').value) || 1;
+            config.invert_bit_encoding = document.getElementById('invertBit').checked;
+            config.simplified_prob_update = document.getElementById('simplifiedProb').checked;
+            config.no_repeated_offsets = document.getElementById('noRepeatedOffsets').checked;
+            config.eof_in_length = document.getElementById('eofInLength').checked;
+            if (document.getElementById('invertMatch').checked) config.is_match_bit = false;
+            if (document.getElementById('invertNewOffset').checked) config.new_offset_bit = false;
+            if (document.getElementById('invertContinue').checked) config.continue_value_bit = false;
+            const maxOffset = parseInt(document.getElementById('maxOffset').value) || 0;
+            const maxLength = parseInt(document.getElementById('maxLength').value) || 0;
+            if (maxOffset > 0) config.max_offset = maxOffset;
+            if (maxLength > 0) config.max_length = maxLength;
+            return config;
+        }
+
+        function updateMode() {
+            const mode = modeSelect.value;
+            if (mode.startsWith('batch')) {
+                selectBtn.textContent = 'Select Folder';
+                fileInput.webkitdirectory = true;
+                fileInput.removeAttribute('multiple');
+            } else {
+                selectBtn.textContent = 'Select Files';
+                fileInput.removeAttribute('webkitdirectory');
+                fileInput.multiple = true;
+            }
+            fileInput.value = '';
+            fileCount.textContent = '';
+        }
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length === 1) {
+                fileCount.textContent = this.files[0].name;
+            } else if (this.files.length > 1) {
+                const firstFile = this.files[0];
+                const path = firstFile.webkitRelativePath || '';
+                const dirName = path.split('/')[0] || 'directory';
+                fileCount.textContent = dirName + ' (' + this.files.length + ' files)';
+            } else {
+                fileCount.textContent = '';
+            }
+        });
+
+        async function readFile(file) {
+            return new Uint8Array(await file.arrayBuffer());
+        }
+
+        async function process() {
+            batchZip = null;
+            lastResult = null;
+            const mode = modeSelect.value;
+            const files = fileInput.files;
+            const config = getConfig();
+            const level = parseInt(document.getElementById('level').value) || 1;
+            const reverse = document.getElementById('reverse').checked;
+
+            if (!files.length) return alert('Select file(s)');
+
+            try {
+                if (mode === 'compress') {
+                    const data = await readFile(files[0]);
+                    const result = UPKR.compress(data, level, config, reverse);
+                    lastResult = result;
+                    lastFilename = files[0].name + '.upkr';
+                    showResult(data.length, result.length);
+                } else if (mode === 'decompress') {
+                    const data = await readFile(files[0]);
+                    const result = UPKR.decompress(data, config, reverse);
+                    lastResult = result;
+                    lastFilename = files[0].name.replace(/\.upkr$/, '');
+                    showResult(data.length, result.length);
+                } else if (mode === 'batchCompress') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchCompress(files, zip, level, config, reverse, 0, []);
+                    return;
+                } else if (mode === 'batchDecompress') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchDecompress(files, zip, config, reverse, 0);
+                    return;
+                }
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function processBatchCompress(files, zip, level, config, reverse, index, results) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length, results);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const result = UPKR.compress(data, level, config, reverse);
+                const name = files[index].name + '.upkr';
+                zip.file(name, result);
+                results.push({ name: files[index].name, origSize: data.length, compSize: result.length });
+                setTimeout(() => processBatchCompress(files, zip, level, config, reverse, index + 1, results), 0);
+            });
+        }
+
+        function processBatchDecompress(files, zip, config, reverse, index) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const result = UPKR.decompress(data, config, reverse);
+                zip.file(files[index].name.replace(/\.upkr$/, ''), result);
+                setTimeout(() => processBatchDecompress(files, zip, config, reverse, index + 1), 0);
+            });
+        }
+
+        function showResult(orig, result) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Success!';
+            document.getElementById('origSize').textContent = orig;
+            document.getElementById('resultSize').textContent = result;
+            document.getElementById('ratio').textContent = ((result / orig) * 100).toFixed(1);
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showError(msg) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'error';
+            document.getElementById('status').textContent = 'Error: ' + msg;
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showBatch(count, results) {
+            const elapsed = ((Date.now() - batchStartTime) / 1000).toFixed(1);
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Done! ' + count + ' files (' + elapsed + 's)';
+
+            if (results && results.length > 0) {
+                let totalOrig = 0, totalComp = 0;
+                for (const r of results) {
+                    totalOrig += r.origSize;
+                    totalComp += r.compSize;
+                }
+                document.getElementById('progress').innerHTML =
+                    `Total: ${totalOrig} &rarr; ${totalComp} (${((totalComp / totalOrig) * 100).toFixed(1)}%)`;
+            } else {
+                document.getElementById('progress').textContent = '';
+            }
+
+            document.getElementById('origSize').textContent = '-';
+            document.getElementById('resultSize').textContent = '-';
+            document.getElementById('ratio').textContent = '-';
+        }
+
+        function download() {
+            const a = document.createElement('a');
+            if (batchZip) {
+                batchZip.generateAsync({ type: 'blob' }).then(blob => {
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'upkr_results.zip';
+                    a.click();
+                });
+            } else if (lastResult) {
+                a.href = URL.createObjectURL(new Blob([lastResult]));
+                a.download = lastFilename;
+                a.click();
+            }
+        }
+
+        updateMode();
+    </script>
+</body>
+</html>
