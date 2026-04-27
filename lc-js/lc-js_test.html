@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LC-JS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+        .box { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; border-radius: 4px; }
+        button { padding: 0.5rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+        .controls button, .controls input, .controls select { flex-shrink: 0; }
+        #result { display: none; margin-top: 1rem; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>LC-JS</h1>
+
+    <div class="box">
+        <select id="mode" onchange="updateMode()">
+            <option value="compressScreen">Compress Screen (.scr)</option>
+            <option value="decompressScreen">Decompress Screen</option>
+            <option value="compress">Compress Raw</option>
+            <option value="decompress">Decompress Raw</option>
+            <option value="batchCompress">Batch Compress Screens</option>
+            <option value="batchDecompress">Batch Decompress Screens</option>
+        </select><br>
+        <div class="controls">
+            <button id="selectBtn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+            <input type="file" id="fileInput" style="display:none">
+            <span id="fileCount" style="flex:1"></span>
+        </div>
+        <div class="controls" id="screenOpts">
+            <label>Segment:
+                <select id="segment">
+                    <option value="full">Full screen</option>
+                    <option value="seg1">Seg 1 (0-2048)</option>
+                    <option value="seg2">Seg 2 (2048-4096)</option>
+                    <option value="seg3">Seg 3 (4096-6144)</option>
+                    <option value="seg12">Seg 1-2 (0-4096)</option>
+                    <option value="seg23">Seg 2-3 (2048-6144)</option>
+                </select>
+            </label>
+            <label><input type="checkbox" id="attrs" checked> Attributes</label>
+            <label><input type="checkbox" id="lcmp5" checked> LCMP5 header</label>
+        </div>
+        <div class="controls">
+            <button onclick="process()">Go</button>
+        </div>
+    </div>
+
+    <div id="result">
+        <p id="status"></p>
+        <p>Original: <span id="origSize">-</span> &rarr; Result: <span id="resultSize">-</span> (<span id="ratio">-</span>%)</p>
+        <p id="progress"></p>
+        <button onclick="download()">Download</button>
+    </div>
+
+    <script src="lc-js.js"></script>
+    <script>
+        let lastResult = null;
+        let lastFilename = 'result.bin';
+        let batchZip = null;
+        let batchStartTime = 0;
+
+        const modeSelect = document.getElementById('mode');
+        const selectBtn = document.getElementById('selectBtn');
+        const fileInput = document.getElementById('fileInput');
+        const fileCount = document.getElementById('fileCount');
+        const screenOpts = document.getElementById('screenOpts');
+
+        const SEGMENTS = {
+            full:  { start: 0,    end: 6144 },
+            seg1:  { start: 0,    end: 2048 },
+            seg2:  { start: 2048, end: 4096 },
+            seg3:  { start: 4096, end: 6144 },
+            seg12: { start: 0,    end: 4096 },
+            seg23: { start: 2048, end: 6144 }
+        };
+
+        function getScreenOpts() {
+            const seg = SEGMENTS[document.getElementById('segment').value];
+            return {
+                start: seg.start,
+                end: seg.end,
+                attrs: document.getElementById('attrs').checked,
+                header: document.getElementById('lcmp5').checked
+            };
+        }
+
+        function updateMode() {
+            const mode = modeSelect.value;
+            if (mode.startsWith('batch')) {
+                selectBtn.textContent = 'Select Folder';
+                fileInput.webkitdirectory = true;
+                fileInput.removeAttribute('multiple');
+            } else {
+                selectBtn.textContent = 'Select Files';
+                fileInput.removeAttribute('webkitdirectory');
+                fileInput.multiple = true;
+            }
+            const isScreen = mode.includes('Screen') || mode.startsWith('batch');
+            screenOpts.style.display = isScreen ? 'flex' : 'none';
+            fileInput.value = '';
+            fileCount.textContent = '';
+        }
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length === 1) {
+                fileCount.textContent = this.files[0].name;
+            } else if (this.files.length > 1) {
+                const firstFile = this.files[0];
+                const path = firstFile.webkitRelativePath || '';
+                const dirName = path.split('/')[0] || 'directory';
+                fileCount.textContent = dirName + ' (' + this.files.length + ' files)';
+            } else {
+                fileCount.textContent = '';
+            }
+        });
+
+        async function readFile(file) {
+            return new Uint8Array(await file.arrayBuffer());
+        }
+
+        async function process() {
+            batchZip = null;
+            lastResult = null;
+            const mode = modeSelect.value;
+            const files = fileInput.files;
+
+            if (!files.length) return alert('Select file(s)');
+
+            try {
+                if (mode === 'compressScreen') {
+                    const data = await readFile(files[0]);
+                    const opts = getScreenOpts();
+                    const result = LC.compressScreen(data, opts);
+                    lastResult = result.data;
+                    lastFilename = files[0].name + '.lc';
+                    showResult(data.length, result.data.length);
+                } else if (mode === 'decompressScreen') {
+                    const data = await readFile(files[0]);
+                    const opts = getScreenOpts();
+                    const result = LC.decompressScreen(data, opts);
+                    lastResult = result;
+                    lastFilename = files[0].name.replace(/\.lc$/, '');
+                    showResult(data.length, result.length);
+                } else if (mode === 'compress') {
+                    const data = await readFile(files[0]);
+                    const result = LC.compressArray(data);
+                    lastResult = result.data;
+                    lastFilename = files[0].name + '.lc';
+                    showResult(data.length, result.data.length);
+                } else if (mode === 'decompress') {
+                    const data = await readFile(files[0]);
+                    const result = LC.decompressArray(data);
+                    lastResult = result;
+                    lastFilename = files[0].name.replace(/\.lc$/, '');
+                    showResult(data.length, result.length);
+                } else if (mode === 'batchCompress') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchCompress(files, zip, 0, []);
+                    return;
+                } else if (mode === 'batchDecompress') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchDecompress(files, zip, 0);
+                    return;
+                }
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function processBatchCompress(files, zip, index, results) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length, results);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const opts = getScreenOpts();
+                const result = LC.compressScreen(data, opts);
+                const name = files[index].name + '.lc';
+                zip.file(name, result.data);
+                results.push({ name: files[index].name, origSize: data.length, resultSize: result.data.length });
+                setTimeout(() => processBatchCompress(files, zip, index + 1, results), 0);
+            });
+        }
+
+        function processBatchDecompress(files, zip, index) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const opts = getScreenOpts();
+                const result = LC.decompressScreen(data, opts);
+                zip.file(files[index].name.replace(/\.lc$/, ''), result);
+                setTimeout(() => processBatchDecompress(files, zip, index + 1), 0);
+            });
+        }
+
+        function showResult(orig, result) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Success!';
+            document.getElementById('origSize').textContent = orig;
+            document.getElementById('resultSize').textContent = result;
+            document.getElementById('ratio').textContent = ((result / orig) * 100).toFixed(1);
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showError(msg) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'error';
+            document.getElementById('status').textContent = 'Error: ' + msg;
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showBatch(count, results) {
+            const elapsed = ((Date.now() - batchStartTime) / 1000).toFixed(1);
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Done! ' + count + ' files (' + elapsed + 's)';
+            document.getElementById('progress').textContent = '';
+            document.getElementById('origSize').textContent = '-';
+            document.getElementById('resultSize').textContent = '-';
+            document.getElementById('ratio').textContent = '-';
+        }
+
+        function download() {
+            const a = document.createElement('a');
+            if (batchZip) {
+                batchZip.generateAsync({ type: 'blob' }).then(blob => {
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'lc_results.zip';
+                    a.click();
+                });
+            } else if (lastResult) {
+                a.href = URL.createObjectURL(new Blob([lastResult]));
+                a.download = lastFilename;
+                a.click();
+            }
+        }
+
+        updateMode();
+    </script>
+</body>
+</html>

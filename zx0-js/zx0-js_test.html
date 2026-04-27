@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZX0-JS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+        .box { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; border-radius: 4px; }
+        button { padding: 0.5rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+        .controls button, .controls input { flex-shrink: 0; }
+        #result { display: none; margin-top: 1rem; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>ZX0-JS</h1>
+
+    <div class="box">
+        <select id="mode" onchange="updateMode()">
+            <option value="compress">Compress</option>
+            <option value="decompress">Decompress</option>
+            <option value="batchCompress">Batch Compress</option>
+            <option value="batchDecompress">Batch Decompress</option>
+        </select><br>
+        <div class="controls">
+            <button id="selectBtn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+            <input type="file" id="fileInput" style="display:none">
+            <span id="fileCount" style="flex:1"></span>
+        </div>
+        <div class="controls" id="prefixRow" style="display:none">
+            <button id="prefixBtn" onclick="document.getElementById('prefixInput').click()">Select Prefix</button>
+            <input type="file" id="prefixInput" style="display:none">
+            <span id="prefixInfo" style="flex:1"></span>
+            <button id="clearPrefix" onclick="clearPrefix()">X</button>
+        </div>
+        <div class="controls">
+            <label>Skip: <input type="number" id="skip" value="0" min="0" style="width:60px"></label>
+            <label><input type="checkbox" id="backwards"> Backwards</label>
+            <label><input type="checkbox" id="classic"> Classic (v1)</label>
+            <label><input type="checkbox" id="quick"> Quick</label>
+        </div>
+        <div class="controls">
+            <button onclick="process()">Go</button>
+        </div>
+    </div>
+
+    <div id="result">
+        <p id="status"></p>
+        <p>Original: <span id="origSize">-</span> &rarr; Result: <span id="resultSize">-</span> (<span id="ratio">-</span>%) Delta: <span id="delta">-</span></p>
+        <p id="progress"></p>
+        <button onclick="download()">Download</button>
+    </div>
+
+    <script src="zx0-js.js"></script>
+    <script>
+        let lastResult = null;
+        let lastFilename = 'result.bin';
+        let batchZip = null;
+        let batchStartTime = 0;
+
+        const modeSelect = document.getElementById('mode');
+        const selectBtn = document.getElementById('selectBtn');
+        const fileInput = document.getElementById('fileInput');
+        const fileCount = document.getElementById('fileCount');
+        const prefixBtn = document.getElementById('prefixBtn');
+        const prefixInput = document.getElementById('prefixInput');
+        const prefixInfo = document.getElementById('prefixInfo');
+        const prefixRow = document.getElementById('prefixRow');
+        const clearPrefixBtn = document.getElementById('clearPrefix');
+        let prefixData = null;
+
+        function clearPrefix() {
+            prefixData = null;
+            prefixInput.value = '';
+            prefixInfo.textContent = '';
+            clearPrefixBtn.style.display = 'none';
+        }
+
+        function updateMode() {
+            const mode = modeSelect.value;
+            if (mode.startsWith('batch')) {
+                selectBtn.textContent = 'Select Folder';
+                fileInput.webkitdirectory = true;
+                fileInput.removeAttribute('multiple');
+            } else {
+                selectBtn.textContent = 'Select Files';
+                fileInput.removeAttribute('webkitdirectory');
+                fileInput.multiple = true;
+            }
+            prefixRow.style.display = 'flex';
+            fileInput.value = '';
+            fileCount.textContent = '';
+            prefixInput.value = '';
+            prefixInfo.textContent = '';
+            clearPrefixBtn.style.display = 'none';
+            prefixData = null;
+        }
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length === 1) {
+                fileCount.textContent = this.files[0].name;
+            } else if (this.files.length > 1) {
+                const firstFile = this.files[0];
+                const path = firstFile.webkitRelativePath || '';
+                const dirName = path.split('/')[0] || 'directory';
+                fileCount.textContent = dirName + ' (' + this.files.length + ' files)';
+            } else {
+                fileCount.textContent = '';
+            }
+        });
+
+        prefixInput.addEventListener('change', async function() {
+            if (this.files.length > 0) {
+                prefixData = await readFile(this.files[0]);
+                prefixInfo.textContent = this.files[0].name + ' (' + prefixData.length + ' bytes)';
+                clearPrefixBtn.style.display = 'inline';
+            }
+        });
+
+        async function readFile(file) {
+            return new Uint8Array(await file.arrayBuffer());
+        }
+
+        async function process() {
+            batchZip = null;
+            lastResult = null;
+            const mode = modeSelect.value;
+            const files = fileInput.files;
+            const backwards = document.getElementById('backwards').checked;
+            const classic = document.getElementById('classic').checked;
+            const quick = document.getElementById('quick').checked;
+
+            if (!files.length) return alert('Select file(s)');
+
+            try {
+                if (mode === 'compress') {
+                    let data = await readFile(files[0]);
+                    let skip = parseInt(document.getElementById('skip').value) || 0;
+                    if (prefixData) {
+                        const combined = new Uint8Array(prefixData.length + data.length);
+                        combined.set(prefixData);
+                        combined.set(data, prefixData.length);
+                        data = combined;
+                        skip = prefixData.length;
+                    }
+                    const result = ZX0.compress(data, skip, backwards, classic, quick);
+                    lastResult = result.data;
+                    lastFilename = backwards ? files[0].name + '.zx0b' : files[0].name + '.zx0';
+                    showResult(data.length, result.data.length, result.delta);
+                } else if (mode === 'decompress') {
+                    const data = await readFile(files[0]);
+                    const result = ZX0.decompress(data, backwards, classic);
+                    lastResult = result;
+                    lastFilename = files[0].name.replace(/\.zx0b?$/, '');
+                    showResult(data.length, result.length, null);
+                } else if (mode === 'batchCompress') {
+                    const skip = parseInt(document.getElementById('skip').value) || 0;
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchCompress(files, zip, backwards, classic, quick, 0, [], skip, prefixData);
+                    return;
+                } else if (mode === 'batchDecompress') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    processBatchDecompress(files, zip, backwards, classic, 0);
+                    return;
+                }
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function processBatchCompress(files, zip, backwards, classic, quick, index, results, skip, prefixData) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length, results);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                let finalData = data;
+                let finalSkip = skip;
+                if (prefixData) {
+                    const combined = new Uint8Array(prefixData.length + data.length);
+                    combined.set(prefixData);
+                    combined.set(data, prefixData.length);
+                    finalData = combined;
+                    finalSkip = prefixData.length;
+                }
+                const result = ZX0.compress(finalData, finalSkip, backwards, classic, quick);
+                const name = backwards ? files[index].name + '.zx0b' : files[index].name + '.zx0';
+                zip.file(name, result.data);
+                results.push({ name: files[index].name, delta: result.delta });
+                setTimeout(() => processBatchCompress(files, zip, backwards, classic, quick, index + 1, results, skip, prefixData), 0);
+            });
+        }
+
+        function processBatchDecompress(files, zip, backwards, classic, index) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const result = ZX0.decompress(data, backwards, classic);
+                zip.file(files[index].name.replace(/\.zx0b?$/, ''), result);
+                setTimeout(() => processBatchDecompress(files, zip, backwards, classic, index + 1), 0);
+            });
+        }
+
+        function showResult(orig, result, delta) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Success!';
+            document.getElementById('origSize').textContent = orig;
+            document.getElementById('resultSize').textContent = result;
+            document.getElementById('ratio').textContent = ((result / orig) * 100).toFixed(1);
+            document.getElementById('delta').textContent = delta !== null ? delta : 'N/A';
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showError(msg) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'error';
+            document.getElementById('status').textContent = 'Error: ' + msg;
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showBatch(count, results) {
+            const elapsed = ((Date.now() - batchStartTime) / 1000).toFixed(1);
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Done! ' + count + ' files (' + elapsed + 's)';
+
+            if (results && results.length > 0) {
+                let minDelta = results[0];
+                let maxDelta = results[0];
+                for (const r of results) {
+                    if (r.delta < minDelta.delta) minDelta = r;
+                    if (r.delta > maxDelta.delta) maxDelta = r;
+                }
+                document.getElementById('progress').innerHTML =
+                    `Min delta: ${minDelta.delta}<br>${minDelta.name}<br><br>` +
+                    `Max delta: ${maxDelta.delta}<br>${maxDelta.name}`;
+            } else {
+                document.getElementById('progress').textContent = '';
+            }
+
+            document.getElementById('origSize').textContent = '-';
+            document.getElementById('resultSize').textContent = '-';
+            document.getElementById('ratio').textContent = '-';
+            document.getElementById('delta').textContent = '-';
+        }
+
+        function download() {
+            const a = document.createElement('a');
+            if (batchZip) {
+                batchZip.generateAsync({ type: 'blob' }).then(blob => {
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'zx0_results.zip';
+                    a.click();
+                });
+            } else if (lastResult) {
+                a.href = URL.createObjectURL(new Blob([lastResult]));
+                a.download = lastFilename;
+                a.click();
+            }
+        }
+
+        updateMode();
+    </script>
+</body>
+</html>
