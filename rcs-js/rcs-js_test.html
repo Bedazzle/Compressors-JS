@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RCS-JS</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+        .box { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; border-radius: 4px; }
+        button { padding: 0.5rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+        table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin-top: 0.5rem; }
+        th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+        th { background: #f4f4f4; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .ok { color: #16a34a; font-weight: 600; }
+        .bad { color: #dc2626; font-weight: 600; }
+        canvas { border: 1px solid #ccc; image-rendering: pixelated; width: 256px; height: 192px; }
+        .muted { color: #777; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <h1>RCS-JS</h1>
+    <p class="muted">RCS (Re-ordered Compressed Screen) by Einar Saukas &mdash; reorder a 6912-byte ZX Spectrum
+    <code>SCR</code> screen, then compress with ZX0/ZX7 for ~10% smaller output. Pure transform; no own format.</p>
+
+    <div class="box">
+        <div class="controls">
+            <button onclick="document.getElementById('fileInput').click()">Select .scr (6912 bytes)</button>
+            <input type="file" id="fileInput" style="display:none">
+            <button onclick="runSelfTest()">Run built-in self-test</button>
+            <span id="fileInfo" class="muted"></span>
+        </div>
+        <div class="controls">
+            <canvas id="preview" width="256" height="192"></canvas>
+        </div>
+        <table id="results" style="display:none">
+            <thead><tr><th>Method</th><th>Size</th><th>Ratio</th><th>Roundtrip</th></tr></thead>
+            <tbody id="tbody"></tbody>
+        </table>
+        <p id="status" class="muted"></p>
+    </div>
+
+    <script src="../zx0-js/zx0-js.js"></script>
+    <script src="../zx7-js/zx7-js.js"></script>
+    <script src="rcs-js.js"></script>
+    <script>
+    'use strict';
+
+    function eq(a, b) {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    // Draw a standard SCR screen onto the canvas (monochrome, ignoring attrs colour).
+    function drawScr(scr) {
+        const cv = document.getElementById('preview');
+        const ctx = cv.getContext('2d');
+        const img = ctx.createImageData(256, 192);
+        for (let y = 0; y < 192; y++) {
+            const third = y >> 6, charRow = (y >> 3) & 7, line = y & 7;
+            const rowBase = third * 2048 + line * 256 + charRow * 32;
+            for (let col = 0; col < 32; col++) {
+                const b = scr[rowBase + col];
+                for (let bit = 0; bit < 8; bit++) {
+                    const on = (b >> (7 - bit)) & 1;
+                    const px = (y * 256 + col * 8 + bit) * 4;
+                    const v = on ? 0 : 255;
+                    img.data[px] = img.data[px + 1] = img.data[px + 2] = v;
+                    img.data[px + 3] = 255;
+                }
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+    }
+
+    function run(scr) {
+        drawScr(scr);
+        const orig = scr.length;
+        const methods = [
+            ['RCS + ZX0',           d => RCS.compressZX0(d),       d => RCS.decompressZX0(d)],
+            ['RCS + ZX0 backwards', d => RCS.compressZX0(d, true), d => RCS.decompressZX0(d, true)],
+            ['RCS + ZX7',           d => RCS.compressZX7(d),       d => RCS.decompressZX7(d)],
+            ['RCS + ZX7 backwards', d => RCS.compressZX7(d, true), d => RCS.decompressZX7(d, true)],
+            ['RCS reorder (no compression)',
+                d => RCS.reorderScrToRcs(d), d => RCS.reorderRcsToScr(d)],
+            ['plain ZX0 (no RCS)',  d => ZX0.compress(d, 0).data,  d => ZX0.decompress(d)],
+            ['plain ZX7 (no RCS)',  d => ZX7.compress(d).data,     d => ZX7.decompress(d)],
+        ];
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '';
+        let allOk = true;
+        for (const [name, comp, decomp] of methods) {
+            let size = '-', ratio = '-', rtHtml;
+            try {
+                const packed = comp(scr);
+                size = packed.length;
+                ratio = (packed.length / orig * 100).toFixed(1) + '%';
+                const back = decomp(packed);
+                const ok = eq(back, scr);
+                if (!ok) allOk = false;
+                rtHtml = ok ? '<span class="ok">&#10004; ok</span>'
+                            : '<span class="bad">&#10008; MISMATCH</span>';
+            } catch (e) {
+                allOk = false;
+                rtHtml = '<span class="bad">error: ' + e.message + '</span>';
+            }
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + name + '</td><td class="num">' + size +
+                '</td><td class="num">' + ratio + '</td><td>' + rtHtml + '</td>';
+            tbody.appendChild(tr);
+        }
+        document.getElementById('results').style.display = '';
+        document.getElementById('status').innerHTML = allOk
+            ? '<span class="ok">All roundtrips passed.</span>'
+            : '<span class="bad">Some roundtrips failed &mdash; see table.</span>';
+    }
+
+    // Synthetic 6912-byte screen with structure (so compression is meaningful).
+    function makeTestScreen() {
+        const scr = new Uint8Array(6912);
+        let x = 0x1234;
+        for (let i = 0; i < 6144; i++) {
+            x = (x * 1103515245 + 12345) & 0x7fffffff;
+            // mostly-empty with bands of pattern -> compressible, RCS-friendly
+            scr[i] = ((i >> 5) & 3) === 0 ? 0 : ((x >> 9) & 0xff) & (((i >> 8) & 1) ? 0x0f : 0xf0);
+        }
+        for (let i = 6144; i < 6912; i++) scr[i] = 0x38; // white on black
+        return scr;
+    }
+
+    function runSelfTest() {
+        document.getElementById('fileInfo').textContent = '(built-in synthetic screen)';
+        run(makeTestScreen());
+    }
+
+    document.getElementById('fileInput').addEventListener('change', async function () {
+        if (!this.files.length) return;
+        const buf = new Uint8Array(await this.files[0].arrayBuffer());
+        document.getElementById('fileInfo').textContent = this.files[0].name + ' (' + buf.length + ' bytes)';
+        if (buf.length !== 6912) {
+            document.getElementById('status').innerHTML =
+                '<span class="bad">Expected a 6912-byte SCR screen, got ' + buf.length + ' bytes.</span>';
+            return;
+        }
+        run(buf);
+    });
+
+    // Auto-run the self-test on load so the page is useful immediately.
+    runSelfTest();
+    </script>
+</body>
+</html>

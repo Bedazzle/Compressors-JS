@@ -1,6 +1,6 @@
 # UPKR-JS - LZ Compression with rANS Entropy Coding
 
-JavaScript implementation of the upkr compression format, originally developed by exoticorn (Dennis Ranke).
+Pure-JavaScript port by Bedazzle (2026) of **upkr**, the LZ + rANS entropy compression format by exoticorn (Dennis Ranke).
 
 ## About
 

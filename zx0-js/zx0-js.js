@@ -1,3 +1,11 @@
+(function(){
+/*
+ * zx0-js — ZX0 optimal LZ77/LZSS compression in JavaScript (successor to ZX7)
+ * Original by Einar Saukas — https://github.com/einar-saukas/ZX0
+ * JavaScript port by Bedazzle, 2026.
+ * License: BSD-3-Clause — see LICENSE file.
+ */
+
 const MAX_OFFSET_ZX0 = 32640;
 const MAX_OFFSET_ZX7 = 2176;
 const INITIAL_OFFSET = 1;
@@ -327,11 +335,13 @@ function decompressData(inputData, backwards, classic) {
     return decompress(data, false, classic);
 }
 
-if (typeof window !== 'undefined') {
-    window.ZX0 = {
-        compress: compressData,
-        decompress: decompressData,
-        MAX_OFFSET_ZX0,
-        MAX_OFFSET_ZX7
-    };
-}
+const ZX0 = {
+    compress: compressData,
+    decompress: decompressData,
+    MAX_OFFSET_ZX0,
+    MAX_OFFSET_ZX7
+};
+
+if (typeof window !== 'undefined') window.ZX0 = ZX0;
+if (typeof module !== 'undefined' && module.exports) module.exports = ZX0;
+})();

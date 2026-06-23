@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>RIP-JS Self Test</title></head>
+<body>
+<pre id="log"></pre>
+<script src="rip-js.js"></script>
+<script>
+function log(s) { document.getElementById('log').textContent += s + '\n'; }
+
+function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
+function testRoundtrip(name, data, useMrip, level) {
+    try {
+        var compressed = useMrip ? RIP.compressMrip(data, level) : RIP.compress(data, level);
+        var decompressed = useMrip ? RIP.decompressMrip(compressed) : RIP.decompress(compressed);
+        var ok = arraysEqual(data, decompressed);
+        log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' (' + (useMrip ? 'mRIP' : 'RIP') + ' L' + level + '): ' +
+            data.length + ' -> ' + compressed.length + ' -> ' + decompressed.length);
+        if (!ok) {
+            for (var i = 0; i < Math.max(data.length, decompressed.length); i++) {
+                if (data[i] !== decompressed[i]) {
+                    log('  First mismatch at byte ' + i + ': expected ' + data[i] + ' got ' + decompressed[i]);
+                    break;
+                }
+            }
+        }
+        return ok;
+    } catch (e) {
+        log('FAIL ' + name + ' (' + (useMrip ? 'mRIP' : 'RIP') + ' L' + level + '): ' + e.message);
+        return false;
+    }
+}
+
+var pass = 0, fail = 0;
+
+// Test data generators
+function makeRepeating(len) {
+    var d = new Uint8Array(len);
+    for (var i = 0; i < len; i++) d[i] = i & 0xFF;
+    return d;
+}
+
+function makeAllZeros(len) { return new Uint8Array(len); }
+
+function makeText() {
+    var s = 'Hello, World! This is a test of the RIP compression algorithm. Hello, World! Testing 1 2 3. ';
+    var d = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) d[i] = s.charCodeAt(i);
+    return d;
+}
+
+function makeRandom(len) {
+    var d = new Uint8Array(len);
+    var seed = 12345;
+    for (var i = 0; i < len; i++) {
+        seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+        d[i] = (seed >> 16) & 0xFF;
+    }
+    return d;
+}
+
+// Test cases
+var tests = [
+    ['empty', new Uint8Array(0)],
+    ['single byte', new Uint8Array([42])],
+    ['two bytes', new Uint8Array([1, 2])],
+    ['three bytes', new Uint8Array([10, 20, 30])],
+    ['all zeros 10', makeAllZeros(10)],
+    ['all zeros 100', makeAllZeros(100)],
+    ['all zeros 1000', makeAllZeros(1000)],
+    ['repeating 50', makeRepeating(50)],
+    ['repeating 200', makeRepeating(200)],
+    ['repeating 1000', makeRepeating(1000)],
+    ['text', makeText()],
+    ['random 100', makeRandom(100)],
+    ['random 500', makeRandom(500)],
+];
+
+var levels = [1, 5, 9];
+
+for (var t = 0; t < tests.length; t++) {
+    for (var l = 0; l < levels.length; l++) {
+        if (testRoundtrip(tests[t][0], tests[t][1], false, levels[l])) pass++; else fail++;
+        if (testRoundtrip(tests[t][0], tests[t][1], true, levels[l])) pass++; else fail++;
+    }
+}
+
+log('');
+log('Results: ' + pass + ' passed, ' + fail + ' failed');
+log(fail === 0 ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
+</script>
+</body>
+</html>

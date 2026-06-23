@@ -1,6 +1,6 @@
 # ZX7-JS - Optimal LZ77/LZSS Compression
 
-JavaScript implementation of the ZX7 compression algorithm, originally developed by Einar Saukas.
+Pure-JavaScript port by Bedazzle (2026) of **ZX7**, the optimal LZ77/LZSS compression algorithm by Einar Saukas.
 
 ## About
 

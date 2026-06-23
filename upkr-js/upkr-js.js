@@ -1,11 +1,10 @@
-// upkr-js - LZ compression with rANS entropy coding
-//
-// Original Rust implementation by exoticorn (Dennis Ranke)
-// https://github.com/exoticorn/upkr
-//
-// JavaScript port by Bedazzle - 2026
-//
-// License: Unlicense (public domain)
+(function(){
+/*
+ * upkr-js — LZ compression with rANS entropy coding in JavaScript
+ * Original Rust implementation by exoticorn (Dennis Ranke) — https://github.com/exoticorn/upkr
+ * JavaScript port by Bedazzle, 2026.
+ * License: Unlicense (public domain) — see LICENSE file.
+ */
 
 // ============================================================================
 // Configuration
@@ -1087,3 +1086,4 @@ if (typeof module !== 'undefined' && module.exports) {
         configX86b: upkrConfigX86b
     };
 }
+})();

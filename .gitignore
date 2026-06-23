@@ -1,0 +1,22 @@
+# Accidental shell-redirect artifacts (Windows / git-bash)
+nul
+NUL
+C:*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+.idea/
+.vscode/
+
+# Node / tooling
+node_modules/
+npm-debug.log*
+*.log
+
+# Local scratch
+/tmp/
+*.tmp

@@ -1,0 +1,14 @@
+# Normalize line endings: store text as LF in the repo, check out native.
+* text=auto
+
+# Source files are LF in the repository.
+*.js   text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.asm  text eol=lf
+*.py   text eol=lf
+
+# Binary assets must never be line-ending converted.
+*.jpg  binary
+*.png  binary
+*.gif  binary

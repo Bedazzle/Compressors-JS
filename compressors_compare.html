@@ -1,0 +1,3622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compression Compare</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 1.5rem; }
+        h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 1rem; color: #fff; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+        .controls button { padding: 0.4rem 0.9rem; cursor: pointer; background: #2d2d4a; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; font-size: 0.85rem; }
+        .controls button:hover { background: #3d3d5a; }
+        .controls button:disabled { opacity: 0.5; cursor: default; }
+        .controls label { font-size: 0.85rem; }
+        .controls input[type=number] { width: 40px; background: #2d2d4a; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 0.3rem; text-align: center; }
+        .controls select { background: #2d2d4a; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 0.3rem; }
+        #fileInfo { font-size: 0.85rem; color: #aaa; }
+        #progress { font-size: 0.85rem; color: #7eb8da; margin-bottom: 0.5rem; min-height: 1.2em; }
+        table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
+        thead th { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #444; color: #aaa; font-weight: 500; cursor: pointer; user-select: none; white-space: nowrap; }
+        thead th:hover { color: #fff; }
+        thead th.sorted-asc::after { content: ' \25B2'; font-size: 0.7em; }
+        thead th.sorted-desc::after { content: ' \25BC'; font-size: 0.7em; }
+        tbody tr { border-bottom: 1px solid #2a2a40; transition: background 0.15s; }
+        tbody tr:hover { background: #252545; }
+        tbody tr.selected { background: #1a3a5c; }
+        tbody tr.baseline { color: #888; }
+        tbody tr.error td { color: #e06060; }
+        tbody tr.running td.status-cell { color: #7eb8da; }
+        td { padding: 0.5rem 0.7rem; white-space: nowrap; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        td.best { color: #4ade80; font-weight: 600; }
+        .verified { color: #4ade80; font-size: 0.75rem; margin-left: 0.3rem; }
+        .verify-fail { color: #e06060; font-size: 0.75rem; margin-left: 0.3rem; }
+        .depacker-input { width: 45px; background: #2d2d4a; color: #e0e0e0; border: 1px solid #333; border-radius: 2px; padding: 0.15rem 0.3rem; text-align: right; font-size: 0.8rem; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
+        .depacker-input::-webkit-inner-spin-button, .depacker-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .asm-btn { background: #2d2d4a; color: #7eb8da; border: 1px solid #444; border-radius: 2px; padding: 0.1rem 0.4rem; cursor: pointer; font-size: 0.75rem; font-family: inherit; }
+        .asm-btn:hover { background: #3d3d5a; color: #fff; }
+        td.chk { text-align: center; padding: 0.3rem 0.4rem; }
+        td.chk input { cursor: pointer; }
+        th.chk-all { text-align: center; padding: 0.3rem 0.4rem; cursor: pointer; }
+        .note { font-size: 0.75rem; color: #777; margin-top: 0.8rem; }
+    </style>
+</head>
+<body>
+    <h1>Compression Compare</h1>
+    <div class="controls">
+        <button id="selectBtn" onclick="document.getElementById('fileInput').click()">Select File</button>
+        <input type="file" id="fileInput" style="display:none">
+        <span id="fileInfo"></span>
+        <label>Level: <input type="number" id="level" value="5" min="1" max="9"></label>
+        <button id="goBtn" onclick="runAll()" disabled>Go</button>
+    </div>
+    <div id="progress"></div>
+    <table>
+        <thead>
+            <tr>
+                <th class="chk-all"><input type="checkbox" id="checkAll" checked title="Select all" onchange="toggleAll(this.checked)"></th>
+                <th data-col="method">Method</th>
+                <th data-col="size">Size</th>
+                <th data-col="saved">Saved</th>
+                <th data-col="ratio">Ratio</th>
+                <th data-col="depacker">Depacker</th>
+                <th data-col="total">Total</th>
+                <th>ASM</th>
+            </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+    </table>
+    <p class="note">Depacker sizes are editable (Z80 standard depackers). Saved = Size - Original. Total = Saved + Depacker.</p>
+
+    <script src="zx7-js/zx7-js.js"></script>
+    <script src="zx0-js/zx0-js.js"></script>
+    <script src="lc-js/lc-js.js"></script>
+    <script src="exomizer2-js/exomizer2-js.js"></script>
+    <script src="upkr-js/upkr-js.js"></script>
+    <script src="lgk-js/lgk-js.js"></script>
+    <script src="shrinkler-js/shrinkler-js.js"></script>
+    <script src="aplib-js/aplib-js.js"></script>
+    <script src="lzsa2-js/lzsa2-js.js"></script>
+    <script src="hrust-js/hrust-js.js"></script>
+    <script src="rip-js/rip-js.js"></script>
+    <script src="bitbuster-js/bitbuster-js.js"></script>
+    <script src="rcs-js/rcs-js.js"></script>
+    <script>
+    'use strict';
+
+    // ---- Compressor definitions ----
+    // depacker: typical Z80 depacker size in bytes (editable in UI)
+    const compressors = [
+        { id: 'plain',    name: 'Plain (original)', depacker: 0, isBaseline: true },
+        { id: 'rcszx0', name: 'RCS + ZX0', depacker: 112,
+          screenOnly: true,
+          compress: d => RCS.compressZX0(d),
+          decompress: d => RCS.decompressZX0(d) },
+        { id: 'rcszx0b', name: 'RCS + ZX0 backwards', depacker: 113,
+          screenOnly: true,
+          compress: d => RCS.compressZX0(d, true),
+          decompress: d => RCS.decompressZX0(d, true) },
+        { id: 'rcszx7', name: 'RCS + ZX7', depacker: 110,
+          screenOnly: true,
+          compress: d => RCS.compressZX7(d),
+          decompress: d => RCS.decompressZX7(d) },
+        { id: 'rcszx7b', name: 'RCS + ZX7 backwards', depacker: 110,
+          screenOnly: true,
+          compress: d => RCS.compressZX7(d, true),
+          decompress: d => RCS.decompressZX7(d, true) },
+        { id: 'zx7',      name: 'ZX7',              depacker: 69,
+          compress: d => ZX7.compress(d).data,
+          decompress: d => ZX7.decompress(d) },
+        { id: 'zx7b',     name: 'ZX7 backwards',    depacker: 69,
+          compress: d => ZX7.compressBackwards(d).data,
+          decompress: d => ZX7.decompressBackwards(d) },
+        { id: 'zx0',      name: 'ZX0',              depacker: 68,
+          compress: d => ZX0.compress(d, 0).data,
+          decompress: d => ZX0.decompress(d) },
+        { id: 'zx0b',     name: 'ZX0 backwards',    depacker: 69,
+          compress: d => ZX0.compress(d, 0, true).data,
+          decompress: d => ZX0.decompress(d, true) },
+        { id: 'lc',       name: 'LC',               depacker: 209,
+          compress: d => LC.compress(d).data,
+          decompress: d => LC.decompress(d) },
+        { id: 'exo',      name: 'Exomizer 2',       depacker: 169,
+          compress: (d, lv) => Exomizer2.compress(d, lv === 9 ? 65536 : lv * 100).data,
+          decompress: d => Exomizer2.decompress(d) },
+        { id: 'exob',     name: 'Exomizer 2 backwards', depacker: 169,
+          compress: (d, lv) => Exomizer2.compressBackwards(d, lv === 9 ? 65536 : lv * 100).data,
+          decompress: d => Exomizer2.decompressBackwards(d) },
+        { id: 'upkr',     name: 'UPKR',             depacker: 100,
+          compress: (d, lv) => UPKR.compress(d, lv),
+          decompress: d => UPKR.decompress(d) },
+        { id: 'upkrz80',  name: 'UPKR (Z80)',       depacker: 82,
+          compress: (d, lv) => UPKR.compress(d, lv, UPKR.configZ80()),
+          decompress: d => UPKR.decompress(d, UPKR.configZ80()) },
+        { id: 'shrinkler', name: 'Shrinkler',       depacker: 250,
+          compress: (d, lv) => Shrinkler.compress(d, lv, { parityContext: true }),
+          decompress: d => Shrinkler.decompress(d, { parityContext: true }) },
+        { id: 'aplib',    name: 'aPLib',             depacker: 92,
+          compress: (d, lv) => aPLib.compress(d, lv),
+          decompress: d => aPLib.decompress(d) },
+        { id: 'lzsa2',    name: 'LZSA2',            depacker: 69,
+          compress: (d, lv) => LZSA2.compress(d, lv),
+          decompress: d => LZSA2.decompress(d) },
+        { id: 'hrust',    name: 'Hrust',            depacker: 232,
+          compress: (d, lv) => HRUST.compress(d, lv),
+          decompress: d => HRUST.decompress(d) },
+        { id: 'rip',      name: 'RIP',              depacker: 228,
+          compress: (d, lv) => RIP.compress(d, lv),
+          decompress: d => RIP.decompress(d) },
+        { id: 'mrip',     name: 'mRIP',             depacker: 218,
+          compress: (d, lv) => RIP.compressMrip(d, lv),
+          decompress: d => RIP.decompressMrip(d) },
+        { id: 'bb12',     name: 'BitBuster 1.2',    depacker: 124,
+          compress: (d, lv) => BitBuster.compress(d, lv),
+          decompress: d => BitBuster.decompress(d) },
+        { id: 'bb2',      name: 'BitBuster 2',      depacker: 104,
+          compress: (d, lv) => BitBuster.compress2(d, lv),
+          decompress: d => BitBuster.decompress2(d) },
+    ];
+
+    // Screen-only compressors (6912 bytes), added conditionally
+    const screenOnlyEntries = [
+        { id: 'lcscr', name: 'LC screen', depacker: 209,
+          screenOnly: true,
+          compress: d => LC.compressScreen(d).data,
+          decompress: d => LC.decompressScreen(d) },
+        { id: 'lgk', name: 'LgK', depacker: 612,
+          screenOnly: true,
+          compress: d => LgK.compress(d),
+          decompress: d => LgK.decompress(d) },
+        { id: 'lgkopt', name: 'LgK (opt)', depacker: 612,
+          screenOnly: true, attrsModified: true,
+          compress: d => LgK.compress(d, { optimizeAttrs: true }),
+          decompress: d => LgK.decompress(d) },
+    ];
+
+    let inputData = null;
+    let results = [];
+    let sortCol = null;
+    let sortAsc = true;
+
+    // ---- Checkbox state (localStorage) ----
+    const STORAGE_KEY = 'compressors_enabled';
+    let enabledMap = {};
+
+    function loadEnabled() {
+        try {
+            const s = localStorage.getItem(STORAGE_KEY);
+            if (s) enabledMap = JSON.parse(s);
+        } catch (e) {}
+    }
+
+    function saveEnabled() {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(enabledMap)); } catch (e) {}
+    }
+
+    function isEnabled(id) {
+        return enabledMap[id] !== false; // default true
+    }
+
+    function toggleEnabled(id, checked) {
+        enabledMap[id] = checked;
+        saveEnabled();
+        updateCheckAll();
+    }
+
+    function toggleAll(checked) {
+        for (const c of getActiveCompressors()) {
+            if (c.isBaseline) continue;
+            enabledMap[c.id] = checked;
+        }
+        saveEnabled();
+        renderTable();
+    }
+
+    function updateCheckAll() {
+        const active = getActiveCompressors().filter(c => !c.isBaseline);
+        const allChecked = active.every(c => isEnabled(c.id));
+        document.getElementById('checkAll').checked = allChecked;
+    }
+
+    loadEnabled();
+
+    // ---- File selection ----
+    const fileInput = document.getElementById('fileInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const goBtn = document.getElementById('goBtn');
+
+    fileInput.addEventListener('change', async function() {
+        if (!this.files.length) return;
+        const file = this.files[0];
+        inputData = new Uint8Array(await file.arrayBuffer());
+        fileInfo.textContent = file.name + ' (' + inputData.length + ' bytes)';
+        goBtn.disabled = false;
+        results = [];
+        renderTable();
+    });
+
+    // ---- Build active compressor list ----
+    function getActiveCompressors() {
+        const list = compressors.slice();
+        list.push(...screenOnlyEntries);
+        return list;
+    }
+
+    // ---- Run all compressors ----
+    async function runAll() {
+        if (!inputData) return;
+        goBtn.disabled = true;
+        const level = parseInt(document.getElementById('level').value) || 5;
+        const active = getActiveCompressors();
+        const origSize = inputData.length;
+        results = [];
+
+        // Baseline
+        results.push({ id: 'plain', size: origSize, saved: 0, ratio: 100, depacker: 0, total: 0, verified: true, isBaseline: true });
+
+        renderTable();
+
+        for (let i = 0; i < active.length; i++) {
+            const c = active[i];
+            if (c.isBaseline) continue;
+            if (!isEnabled(c.id)) continue;
+            if (c.screenOnly && origSize !== 6912) continue;
+
+            document.getElementById('progress').textContent = 'Compressing: ' + c.name + ' (' + (i) + '/' + (active.length - 1) + ')...';
+            renderTable();
+
+            await sleep(5);
+
+            try {
+                const compressed = c.compress(inputData, level);
+                const compSize = compressed.length || compressed.byteLength;
+
+                // Verify roundtrip
+                let verified = false;
+                let verifyError = '';
+                try {
+                    const decompressed = c.decompress(compressed);
+                    if (decompressed.length === origSize) {
+                        if (c.attrsModified) {
+                            // optimizeAttrs changes both pixels and attrs; just verify decompression succeeds
+                            verified = true;
+                            verifyError = 'attrs optimized';
+                        } else {
+                            verified = true;
+                            for (let j = 0; j < origSize; j++) {
+                                if (decompressed[j] !== inputData[j]) {
+                                    verified = false;
+                                    verifyError = 'mismatch at byte ' + j;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        verifyError = 'length ' + decompressed.length + ' vs ' + origSize;
+                    }
+                } catch (e) {
+                    verifyError = 'decompress: ' + e.message;
+                }
+
+                const dp = getDepackerSize(c.id);
+                const saved = compSize - origSize;
+                results.push({
+                    id: c.id,
+                    size: compSize,
+                    saved: saved,
+                    ratio: (compSize / origSize * 100),
+                    depacker: dp,
+                    total: saved + dp,
+                    verified: verified,
+                    verifyError: verifyError,
+                    compressedData: new Uint8Array(compressed)
+                });
+            } catch (e) {
+                results.push({
+                    id: c.id,
+                    size: null,
+                    saved: null,
+                    ratio: null,
+                    depacker: getDepackerSize(c.id),
+                    total: null,
+                    verified: false,
+                    verifyError: e.message,
+                    error: true
+                });
+            }
+
+            renderTable();
+        }
+
+        document.getElementById('progress').textContent = 'Done.';
+        goBtn.disabled = false;
+    }
+
+    function getDepackerSize(id) {
+        const el = document.querySelector('.depacker-input[data-id="' + id + '"]');
+        if (el) return parseInt(el.value) || 0;
+        const c = getActiveCompressors().find(x => x.id === id);
+        return c ? c.depacker : 0;
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // ---- Render table ----
+    function renderTable() {
+        const tbody = document.getElementById('tbody');
+        const active = getActiveCompressors();
+        const rows = [];
+
+        for (const c of active) {
+            const r = results.find(x => x.id === c.id);
+            rows.push({ def: c, result: r || null });
+        }
+
+        // Sort
+        if (sortCol) {
+            rows.sort((a, b) => {
+                if (a.def.isBaseline) return -1;
+                if (b.def.isBaseline) return 1;
+                const av = getSortValue(a, sortCol);
+                const bv = getSortValue(b, sortCol);
+                if (av === null && bv === null) return 0;
+                if (av === null) return 1;
+                if (bv === null) return -1;
+                return sortAsc ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+            });
+        }
+
+        // Find bests
+        let bestSize = Infinity, bestSaved = Infinity, bestRatio = Infinity, bestTotal = Infinity;
+        for (const row of rows) {
+            if (!row.result || row.result.isBaseline || row.result.error) continue;
+            if (row.result.size < bestSize) bestSize = row.result.size;
+            if (row.result.saved < bestSaved) bestSaved = row.result.saved;
+            if (row.result.ratio < bestRatio) bestRatio = row.result.ratio;
+            if (row.result.total < bestTotal) bestTotal = row.result.total;
+        }
+
+        let html = '';
+        for (const row of rows) {
+            const c = row.def;
+            const r = row.result;
+            const cls = [];
+            if (c.isBaseline) cls.push('baseline');
+            if (r && r.error) cls.push('error');
+            if (!r && !c.isBaseline) cls.push('running');
+
+            html += '<tr class="' + cls.join(' ') + '">';
+
+            // Checkbox
+            if (c.isBaseline) {
+                html += '<td class="chk"></td>';
+            } else {
+                html += '<td class="chk"><input type="checkbox"' + (isEnabled(c.id) ? ' checked' : '') + ' onchange="toggleEnabled(\'' + c.id + '\',this.checked)"></td>';
+            }
+
+            // Method
+            html += '<td>' + esc(c.name);
+            if (r && r.verified && r.verifyError) html += '<span class="verified" title="' + esc(r.verifyError) + '">&#10003;*</span>';
+            else if (r && r.verified) html += '<span class="verified" title="Roundtrip verified">&#10003;</span>';
+            else if (r && !r.verified && r.verifyError) html += '<span class="verify-fail" title="' + esc(r.verifyError) + '">&#10007;</span>';
+            html += '</td>';
+
+            if (c.isBaseline && r) {
+                html += '<td class="num">' + r.size + '</td>';
+                html += '<td class="num">0</td>';
+                html += '<td class="num">100.0%</td>';
+                html += '<td class="num">0</td>';
+                html += '<td class="num">0</td>';
+                html += '<td></td>';
+            } else if (r && !r.error) {
+                html += '<td class="num' + (r.size === bestSize ? ' best' : '') + '">' + r.size + '</td>';
+                html += '<td class="num' + (r.saved === bestSaved ? ' best' : '') + '">' + r.saved + '</td>';
+                html += '<td class="num' + (r.ratio === bestRatio ? ' best' : '') + '">' + r.ratio.toFixed(1) + '%</td>';
+                html += '<td class="num"><input class="depacker-input" data-id="' + c.id + '" type="number" value="' + r.depacker + '" min="0" onchange="updateDepacker(this)"></td>';
+                html += '<td class="num' + (r.total === bestTotal ? ' best' : '') + '">' + r.total + '</td>';
+                html += '<td>' + (asmInfo[c.id] ? '<button class="asm-btn" onclick="downloadAsm(\'' + c.id + '\')">ASM</button>' : '') + '</td>';
+            } else if (r && r.error) {
+                html += '<td class="num" colspan="3">' + esc(r.verifyError) + '</td>';
+                html += '<td class="num"><input class="depacker-input" data-id="' + c.id + '" type="number" value="' + c.depacker + '" min="0"></td>';
+                html += '<td class="num">-</td>';
+                html += '<td></td>';
+            } else {
+                // Not yet run
+                html += '<td class="num status-cell">-</td>';
+                html += '<td class="num status-cell">-</td>';
+                html += '<td class="num status-cell">-</td>';
+                html += '<td class="num"><input class="depacker-input" data-id="' + c.id + '" type="number" value="' + c.depacker + '" min="0" onchange="updateDepacker(this)"></td>';
+                html += '<td class="num status-cell">-</td>';
+                html += '<td></td>';
+            }
+
+            html += '</tr>';
+        }
+        tbody.innerHTML = html;
+        updateCheckAll();
+    }
+
+    function getSortValue(row, col) {
+        if (col === 'method') return row.def.name.toLowerCase();
+        if (col === 'depacker') return row.result ? row.result.depacker : row.def.depacker;
+        const r = row.result;
+        if (!r || r.error) return null;
+        switch (col) {
+            case 'size': return r.size;
+            case 'saved': return r.saved;
+            case 'ratio': return r.ratio;
+            case 'total': return r.total;
+        }
+        return null;
+    }
+
+    function updateDepacker(el) {
+        const id = el.dataset.id;
+        const r = results.find(x => x.id === id);
+        if (r && !r.error && !r.isBaseline) {
+            r.depacker = parseInt(el.value) || 0;
+            r.total = r.saved + r.depacker;
+            renderTable();
+        }
+    }
+
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // ---- ASM depacker definitions ----
+    // Z80 depacker sources from https://github.com/uniabis/z80depacker
+    // ZX0 backward from https://github.com/einar-saukas/ZX0
+
+    const asmInfo = {
+        zx7: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; ZX7 decoder by Einar Saukas, Antonio Villena & Metalbrain\n\
+; "Standard" version (69 bytes only)\n\
+; HL: source address, DE: destination address\n\
+depacker:\n\
+        ld      a, $80\n\
+.copy_byte_loop:\n\
+        ldi\n\
+.main_loop:\n\
+        call    .next_bit\n\
+        jr      nc, .copy_byte_loop\n\
+        push    de\n\
+        ld      bc, 0\n\
+        ld      d, b\n\
+.len_size_loop:\n\
+        inc     d\n\
+        call    .next_bit\n\
+        jr      nc, .len_size_loop\n\
+.len_value_loop:\n\
+        call    nc, .next_bit\n\
+        rl      c\n\
+        rl      b\n\
+        jr      c, .exit\n\
+        dec     d\n\
+        jr      nz, .len_value_loop\n\
+        inc     bc\n\
+        ld      e, (hl)\n\
+        inc     hl\n\
+        defb    $cb, $33 ; SLL E\n\
+        jr      nc, .offset_end\n\
+        ld      d, $10\n\
+.rld_next_bit:\n\
+        call    .next_bit\n\
+        rl      d\n\
+        jr      nc, .rld_next_bit\n\
+        inc     d\n\
+        srl     d\n\
+.offset_end:\n\
+        rr      e\n\
+        ex      (sp), hl\n\
+        push    hl\n\
+        sbc     hl, de\n\
+        pop     de\n\
+        ldir\n\
+.exit:\n\
+        pop     hl\n\
+        jr      nc, .main_loop\n\
+.next_bit:\n\
+        add     a, a\n\
+        ret     nz\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        rla\n\
+        ret\n'
+        },
+        zx7b: {
+            setup: '    ld hl,packed_data_end-1\n    ld de,$5AFF\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; ZX7 decoder by Einar Saukas, Antonio Villena & Metalbrain\n\
+; "Standard" version (69 bytes only) - BACKWARDS VARIANT\n\
+; HL: last source address, DE: last destination address\n\
+depacker:\n\
+        ld      a, $80\n\
+.copy_byte_loop:\n\
+        ldd\n\
+.main_loop:\n\
+        call    .next_bit\n\
+        jr      nc, .copy_byte_loop\n\
+\n\
+        push    de\n\
+        ld      bc, 0\n\
+        ld      d, b\n\
+.len_size_loop:\n\
+        inc     d\n\
+        call    .next_bit\n\
+        jr      nc, .len_size_loop\n\
+\n\
+.len_value_loop:\n\
+        call    nc, .next_bit\n\
+        rl      c\n\
+        rl      b\n\
+        jr      c, .exit\n\
+        dec     d\n\
+        jr      nz, .len_value_loop\n\
+        inc     bc\n\
+\n\
+        ld      e, (hl)\n\
+        dec     hl\n\
+        defb    $cb, $33 ; SLL E\n\
+        jr      nc, .offset_end\n\
+        ld      d, $10\n\
+.rld_next_bit:\n\
+        call    .next_bit\n\
+        rl      d\n\
+        jr      nc, .rld_next_bit\n\
+        inc     d\n\
+        srl     d\n\
+.offset_end:\n\
+        rr      e\n\
+\n\
+        ex      (sp), hl\n\
+        push    hl\n\
+        adc     hl, de\n\
+        pop     de\n\
+        lddr\n\
+.exit:\n\
+        pop     hl\n\
+        jr      nc, .main_loop\n\
+.next_bit:\n\
+        add     a, a\n\
+        ret     nz\n\
+        ld      a, (hl)\n\
+        dec     hl\n\
+        rla\n\
+        ret\n'
+        },
+        zx0: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; ZX0 decoder by Einar Saukas & Urusergi\n\
+; "Standard" version (68 bytes only)\n\
+; HL: source address, DE: destination address\n\
+depacker:\n\
+        ld      bc, $ffff\n\
+        push    bc\n\
+        inc     bc\n\
+        ld      a, $80\n\
+.literals:\n\
+        call    .elias\n\
+        ldir\n\
+        add     a, a\n\
+        jr      c, .new_offset\n\
+        call    .elias\n\
+.copy:\n\
+        ex      (sp), hl\n\
+        push    hl\n\
+        add     hl, de\n\
+        ldir\n\
+        pop     hl\n\
+        ex      (sp), hl\n\
+        add     a, a\n\
+        jr      nc, .literals\n\
+.new_offset:\n\
+        pop     bc\n\
+        ld      c, $fe\n\
+        call    .elias_loop\n\
+        inc     c\n\
+        ret     z\n\
+        ld      b, c\n\
+        ld      c, (hl)\n\
+        inc     hl\n\
+        rr      b\n\
+        rr      c\n\
+        push    bc\n\
+        ld      bc, 1\n\
+        call    nc, .elias_backtrack\n\
+        inc     bc\n\
+        jr      .copy\n\
+.elias:\n\
+        inc     c\n\
+.elias_loop:\n\
+        add     a, a\n\
+        jr      nz, .elias_skip\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        rla\n\
+.elias_skip:\n\
+        ret     c\n\
+.elias_backtrack:\n\
+        add     a, a\n\
+        rl      c\n\
+        rl      b\n\
+        jr      .elias_loop\n'
+        },
+        zx0b: {
+            setup: '    ld hl,packed_data_end-1\n    ld de,$5AFF\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; ZX0 decoder by Einar Saukas\n\
+; "Standard" version (69 bytes only) - BACKWARDS VARIANT\n\
+; HL: last source byte, DE: last destination byte\n\
+depacker:\n\
+        ld      bc, 1\n\
+        push    bc\n\
+        ld      a, $80\n\
+.literals:\n\
+        call    .elias\n\
+        lddr\n\
+        inc     c\n\
+        add     a, a\n\
+        jr      c, .new_offset\n\
+        call    .elias\n\
+.copy:\n\
+        ex      (sp), hl\n\
+        push    hl\n\
+        add     hl, de\n\
+        lddr\n\
+        inc     c\n\
+        pop     hl\n\
+        ex      (sp), hl\n\
+        add     a, a\n\
+        jr      nc, .literals\n\
+.new_offset:\n\
+        inc     sp\n\
+        inc     sp\n\
+        call    .elias\n\
+        dec     b\n\
+        ret     z\n\
+        dec     c\n\
+        ld      b, c\n\
+        ld      c, (hl)\n\
+        dec     hl\n\
+        srl     b\n\
+        rr      c\n\
+        inc     bc\n\
+        push    bc\n\
+        ld      bc, 1\n\
+        call    c, .elias_backtrack\n\
+        inc     bc\n\
+        jr      .copy\n\
+.elias_backtrack:\n\
+        add     a, a\n\
+        rl      c\n\
+        rl      b\n\
+.elias:\n\
+        add     a, a\n\
+        jr      nz, .elias_skip\n\
+        ld      a, (hl)\n\
+        dec     hl\n\
+        rla\n\
+.elias_skip:\n\
+        jr      c, .elias_backtrack\n\
+        ret\n'
+        },
+        lc: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Laser Compact 5.2.1 depacker\n\
+; Entry: HL = compressed data, DE = destination\n\
+; (C) Hrumer. Based on Z80 depacker by Bedazzle\n\
+\n\
+depacker:\n\
+        ld      a, #80\n\
+        ld      (.lc_bits), a\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        ld      (de), a\n\
+        inc     de\n\
+\n\
+.lc_main:\n\
+        call    .lc_getbit\n\
+        jr      nc, .lc_match\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        ld      (de), a\n\
+        inc     de\n\
+        jr      .lc_main\n\
+\n\
+.lc_match:\n\
+        call    .lc_vlc\n\
+        cp      6\n\
+        jr      nz, .lc_not_ext\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        neg\n\
+        ret     z\n\
+        jr      .lc_got_msize\n\
+.lc_not_ext:\n\
+        cp      6\n\
+        jr      nc, .lc_got_msize\n\
+        inc     a\n\
+.lc_got_msize:\n\
+        ld      (.lc_msize), a\n\
+        call    .lc_vlc\n\
+        inc     a\n\
+        ld      b, a\n\
+        call    .lc_getbit\n\
+        ld      a, 0\n\
+        rla\n\
+        ld      (.lc_dir), a\n\
+        ld      c, (hl)\n\
+        inc     hl\n\
+        ld      a, c\n\
+        neg\n\
+        ld      c, a\n\
+        jr      z, .lc_no_borr\n\
+        dec     b\n\
+.lc_no_borr:\n\
+        ld      a, b\n\
+        cp      4\n\
+        jr      nc, .lc_extra\n\
+        cp      3\n\
+        jr      c, .lc_do_copy\n\
+        ld      a, c\n\
+        or      a\n\
+        jr      z, .lc_do_copy\n\
+.lc_extra:\n\
+        ld      a, (.lc_msize)\n\
+        inc     a\n\
+        ld      (.lc_msize), a\n\
+\n\
+.lc_do_copy:\n\
+        ld      (.lc_src), hl\n\
+        ld      h, d\n\
+        ld      l, e\n\
+        or      a\n\
+        sbc     hl, bc\n\
+        ld      a, (hl)\n\
+        ld      (de), a\n\
+        inc     de\n\
+        ld      a, (.lc_msize)\n\
+        or      a\n\
+        jr      z, .lc_cdone\n\
+        ld      b, a\n\
+        ld      a, (.lc_dir)\n\
+        or      a\n\
+        jr      nz, .lc_cbwd\n\
+.lc_cfwd:\n\
+        inc     hl\n\
+        ld      a, (hl)\n\
+        ld      (de), a\n\
+        inc     de\n\
+        djnz    .lc_cfwd\n\
+        jr      .lc_cdone\n\
+.lc_cbwd:\n\
+        dec     hl\n\
+        ld      a, (hl)\n\
+        ld      (de), a\n\
+        inc     de\n\
+        djnz    .lc_cbwd\n\
+.lc_cdone:\n\
+        ld      hl, (.lc_src)\n\
+        jr      .lc_main\n\
+\n\
+; ---- VLC reader ----\n\
+.lc_vlc:\n\
+        call    .lc_getbit\n\
+        jr      nc, .lc_v1\n\
+        xor     a\n\
+        ret\n\
+.lc_v1: call    .lc_getbit\n\
+        ld      a, 0\n\
+        rla\n\
+        ld      c, a\n\
+        call    .lc_getbit\n\
+        jr      nc, .lc_v2\n\
+        ld      a, 2\n\
+        sub     c\n\
+        ret\n\
+.lc_v2: call    .lc_getbit\n\
+        ld      a, c\n\
+        rla\n\
+        ld      c, a\n\
+        call    .lc_getbit\n\
+        jr      nc, .lc_v3\n\
+        ld      a, c\n\
+        and     3\n\
+        ld      c, a\n\
+        ld      a, 6\n\
+        sub     c\n\
+        ret\n\
+.lc_v3: call    .lc_getbit\n\
+        ld      a, c\n\
+        rla\n\
+        ld      c, a\n\
+        call    .lc_getbit\n\
+        ld      a, c\n\
+        rla\n\
+        and     15\n\
+        ld      c, a\n\
+        ld      a, 22\n\
+        sub     c\n\
+        ret\n\
+\n\
+; ---- Bit reader ----\n\
+.lc_getbit:\n\
+        ld      a, (.lc_bits)\n\
+        add     a, a\n\
+        ld      (.lc_bits), a\n\
+        ret     nz\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        scf\n\
+        rla\n\
+        ld      (.lc_bits), a\n\
+        ret\n\
+\n\
+; Variables\n\
+.lc_bits:  db 0\n\
+.lc_msize: db 0\n\
+.lc_dir:   db 0\n\
+.lc_src:   dw 0\n'
+        },
+        lcscr: {
+            setup: '    ld hl,packed_data\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Depacker Laser Compact 5.2.1\n\
+; (C) Hrumer. 06.12.99. Hrumer@inbox.ru\n\
+; IN: HL - Address of compressed screen (with LCMP5 header)\n\
+; Decompresses directly to screen at $4000\n\
+\n\
+ADR     equ     $4000\n\
+\n\
+depacker:\n\
+        ld      de, 7\n\
+        add     hl, de\n\
+\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        ld      e, a\n\
+        add     hl, de\n\
+\n\
+        ld      a, (hl)\n\
+        ld      e, a\n\
+\n\
+        and     3\n\
+        rlca\n\
+        rlca\n\
+        rlca\n\
+        or      ADR / 256\n\
+\n\
+        exx\n\
+        ld      d, a\n\
+        ld      e, 0\n\
+        exx\n\
+\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+        xor     ADR / 256 + $18\n\
+        and     $FC\n\
+        ld      ixh, a\n\
+\n\
+.dlc1:  ld      a, (hl)\n\
+        inc     hl\n\
+        ld      ixl, $FF\n\
+.dlc2:\n\
+        exx\n\
+        jr      nz, .dlc10\n\
+        ld      b, 1\n\
+\n\
+.dlc3:  ex      af, af\'\n\
+        sla     d\n\
+        jr      nz, $+6\n\
+        ld      d, (hl)\n\
+        inc     hl\n\
+        defb    $CB, $32\n\
+\n\
+        djnz    .dlc7\n\
+\n\
+        jr      c, .dlc1\n\
+\n\
+        inc     b\n\
+\n\
+.dlc4:  ld      c, %01010110\n\
+        ld      a, $FE\n\
+.dlc5:  sla     d\n\
+        jr      nz, $+6\n\
+        ld      d, (hl)\n\
+        inc     hl\n\
+        rl      d\n\
+        rla\n\
+        sla     c\n\
+        jr      z, .dlc6\n\
+        jr      c, .dlc5\n\
+        rrca\n\
+        jr      nc, .dlc5\n\
+        sub     8\n\
+.dlc6:  add     a, 9\n\
+\n\
+        djnz    .dlc3\n\
+\n\
+        cp      0 - 8 + 1\n\
+        jr      nz, $+4\n\
+        ld      a, (hl)\n\
+        inc     hl\n\
+\n\
+        adc     a, $FF\n\
+        ld      ixl, a\n\
+        jr      c, .dlc4\n\
+        ld      hl, $2758\n\
+        exx\n\
+        ret\n\
+\n\
+.dlc7:  ld      a, (hl)\n\
+        inc     hl\n\
+\n\
+        exx\n\
+        ld      l, a\n\
+        ex      af, af\'\n\
+        ld      h, a\n\
+        add     hl, de\n\
+\n\
+        cp      $FF - 2\n\
+        jr      nc, .dlc8\n\
+        dec     ixl\n\
+.dlc8:\n\
+        ld      a, h\n\
+        cp      ixh\n\
+        jr      nc, .dlc13\n\
+        xor     l\n\
+        and     $F8\n\
+        xor     l\n\
+        ld      b, a\n\
+        xor     l\n\
+        xor     h\n\
+        rlca\n\
+        rlca\n\
+        ld      c, a\n\
+\n\
+.dlc9:  ex      af, af\'\n\
+        ld      a, (bc)\n\
+.dlc10: ex      af, af\'\n\
+        ld      a, d\n\
+        cp      ixh\n\
+        jr      nc, .dlc14\n\
+        xor     e\n\
+        and     $F8\n\
+        xor     e\n\
+        ld      b, a\n\
+        xor     e\n\
+        xor     d\n\
+        rlca\n\
+        rlca\n\
+        ld      c, a\n\
+\n\
+.dlc11: ex      af, af\'\n\
+        ld      (bc), a\n\
+\n\
+        inc     de\n\
+        jr      nc, $+4\n\
+        dec     hl\n\
+        dec     hl\n\
+        inc     hl\n\
+        ex      af, af\'\n\
+        inc     ixl\n\
+        jr      nz, .dlc8\n\
+        jr      .dlc2\n\
+\n\
+.dlc13: scf\n\
+.dlc14: push    af\n\
+        exx\n\
+        add     a, e\n\
+        exx\n\
+        ld      b, a\n\
+        pop     af\n\
+        ld      c, e\n\
+        jr      nc, .dlc11\n\
+        ld      c, l\n\
+        jr      .dlc9\n'
+        },
+        exo: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call deexo\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Exomizer 2 Z80 decoder\n\
+; Copyright (C) 2008-2016 by Jaime Tejedor Gomez (Metalbrain)\n\
+; Optimized by Antonio Villena and Urusergi (169 bytes)\n\
+; input: hl=compressed data start, de=uncompressed destination start\n\
+\n\
+deexo:          ld      iy, exo_mapbasebits+11\n\
+                ld      a, (hl)\n\
+                inc     hl\n\
+                ld      b, 52\n\
+                push    de\n\
+                cp      a\n\
+exo_initbits:   ld      c, 16\n\
+                jr      nz, exo_get4bits\n\
+                ld      ixl, c\n\
+                ld      de, 1\n\
+exo_get4bits:   call    exo_getbit\n\
+                rl      c\n\
+                jr      nc, exo_get4bits\n\
+                inc     c\n\
+                push    hl\n\
+                ld      hl, 1\n\
+                ld      (iy+41), c\n\
+exo_setbit:     dec     c\n\
+                jr      nz, exo_setbit-1\n\
+                ld      (iy-11), e\n\
+                ld      (iy+93), d\n\
+                add     hl, de\n\
+                ex      de, hl\n\
+                inc     iy\n\
+                pop     hl\n\
+                dec     ixl\n\
+                djnz    exo_initbits\n\
+                pop     de\n\
+                jr      exo_mainloop\n\
+exo_literalrun: ld      e, c\n\
+exo_getbits:    dec     b\n\
+                ret     z\n\
+exo_getbits1:   call    exo_getbit\n\
+                rl      e\n\
+                rl      d\n\
+                jr      nc, exo_getbits\n\
+                ld      b, d\n\
+                ld      c, e\n\
+                pop     de\n\
+exo_literalcopy:ldir\n\
+exo_mainloop:   inc     c\n\
+                call    exo_getbit\n\
+                jr      c, exo_literalcopy\n\
+                ld      c, 239\n\
+exo_getindex:   call    exo_getbit\n\
+                inc     c\n\
+                jr      nc, exo_getindex\n\
+                ret     z\n\
+                push    de\n\
+                ld      d, b\n\
+                jp      p, exo_literalrun\n\
+                ld      iy, exo_mapbasebits-229\n\
+                call    exo_getpair\n\
+                push    de\n\
+                rlc     d\n\
+                jr      nz, exo_dontgo\n\
+                dec     e\n\
+                ld      bc, 512+32\n\
+                jr      z, exo_goforit\n\
+                dec     e\n\
+exo_dontgo:     ld      bc, 1024+16\n\
+                jr      z, exo_goforit\n\
+                ld      de, 0\n\
+                ld      c, d\n\
+exo_goforit:    call    exo_getbits1\n\
+                ld      iy, exo_mapbasebits+27\n\
+                add     iy, de\n\
+                call    exo_getpair\n\
+                pop     bc\n\
+                ex      (sp), hl\n\
+                push    hl\n\
+                sbc     hl, de\n\
+                pop     de\n\
+                ldir\n\
+                pop     hl\n\
+                jr      exo_mainloop\n\
+\n\
+exo_getpair:    add     iy, bc\n\
+                ld      e, d\n\
+                ld      b, (iy+41)\n\
+                call    exo_getbits\n\
+                ex      de, hl\n\
+                ld      c, (iy-11)\n\
+                ld      b, (iy+93)\n\
+                add     hl, bc\n\
+                ex      de, hl\n\
+                ret\n\
+\n\
+exo_getbit:     srl     a\n\
+                ret     nz\n\
+                ld      a, (hl)\n\
+                inc     hl\n\
+                rra\n\
+                ret\n\
+\n\
+exo_mapbasebits:\n\
+                defs    156\n'
+        },
+        exob: {
+            setup: '    ld hl,packed_data_end-1\n    ld de,$5AFF\n    call deexo\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Exomizer 2 Z80 decoder (BACKWARDS)\n\
+; Copyright (C) 2008-2016 by Jaime Tejedor Gomez (Metalbrain)\n\
+; Optimized by Antonio Villena and Urusergi\n\
+; Backward variant: reads compressed data and writes output in reverse\n\
+; input: hl=compressed data end, de=uncompressed destination end\n\
+\n\
+deexo:          ld      iy, exo_mapbasebits+11\n\
+                ld      a, (hl)\n\
+                dec     hl\n\
+                ld      b, 52\n\
+                push    de\n\
+                cp      a\n\
+exo_initbits:   ld      c, 16\n\
+                jr      nz, exo_get4bits\n\
+                ld      ixl, c\n\
+                ld      de, 1\n\
+exo_get4bits:   call    exo_getbit\n\
+                rl      c\n\
+                jr      nc, exo_get4bits\n\
+                inc     c\n\
+                push    hl\n\
+                ld      hl, 1\n\
+                ld      (iy+41), c\n\
+exo_setbit:     dec     c\n\
+                jr      nz, exo_setbit-1\n\
+                ld      (iy-11), e\n\
+                ld      (iy+93), d\n\
+                add     hl, de\n\
+                ex      de, hl\n\
+                inc     iy\n\
+                pop     hl\n\
+                dec     ixl\n\
+                djnz    exo_initbits\n\
+                pop     de\n\
+                jr      exo_mainloop\n\
+exo_literalrun: ld      e, c\n\
+exo_getbits:    dec     b\n\
+                ret     z\n\
+exo_getbits1:   call    exo_getbit\n\
+                rl      e\n\
+                rl      d\n\
+                jr      nc, exo_getbits\n\
+                ld      b, d\n\
+                ld      c, e\n\
+                pop     de\n\
+exo_literalcopy:lddr\n\
+exo_mainloop:   inc     c\n\
+                call    exo_getbit\n\
+                jr      c, exo_literalcopy\n\
+                ld      c, 239\n\
+exo_getindex:   call    exo_getbit\n\
+                inc     c\n\
+                jr      nc, exo_getindex\n\
+                ret     z\n\
+                push    de\n\
+                ld      d, b\n\
+                jp      p, exo_literalrun\n\
+                ld      iy, exo_mapbasebits-229\n\
+                call    exo_getpair\n\
+                push    de\n\
+                rlc     d\n\
+                jr      nz, exo_dontgo\n\
+                dec     e\n\
+                ld      bc, 512+32\n\
+                jr      z, exo_goforit\n\
+                dec     e\n\
+exo_dontgo:     ld      bc, 1024+16\n\
+                jr      z, exo_goforit\n\
+                ld      de, 0\n\
+                ld      c, d\n\
+exo_goforit:    call    exo_getbits1\n\
+                ld      iy, exo_mapbasebits+27\n\
+                add     iy, de\n\
+                call    exo_getpair\n\
+                pop     bc\n\
+                ex      (sp), hl\n\
+                push    hl\n\
+                add     hl, de\n\
+                pop     de\n\
+                lddr\n\
+                pop     hl\n\
+                jr      exo_mainloop\n\
+\n\
+exo_getpair:    add     iy, bc\n\
+                ld      e, d\n\
+                ld      b, (iy+41)\n\
+                call    exo_getbits\n\
+                ex      de, hl\n\
+                ld      c, (iy-11)\n\
+                ld      b, (iy+93)\n\
+                add     hl, bc\n\
+                ex      de, hl\n\
+                ret\n\
+\n\
+exo_getbit:     srl     a\n\
+                ret     nz\n\
+                ld      a, (hl)\n\
+                dec     hl\n\
+                rra\n\
+                ret\n\
+\n\
+exo_mapbasebits:\n\
+                defs    156\n'
+        },
+        upkrz80: {
+            setup: '    ld ix,packed_data\n    exx\n    ld de,$4000\n    exx\n    call upkr.unpack\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; UPKR Z80 decompressor\n\
+; by Peter "Ped" Helcmanovsky (C) 2022, "unlicensed"\n\
+; IX = packed data, DE\' = destination\n\
+\n\
+    OPT push reset --syntax=abf\n\
+    MODULE upkr\n\
+\n\
+NUMBER_BITS EQU 16+15\n\
+\n\
+unpack:\n\
+    ld      hl,probs.c>>1\n\
+    ld      bc,probs.e\n\
+    ld      a,$80\n\
+.reset_probs:\n\
+    dec     bc\n\
+    ld      (bc),a\n\
+    dec     c\n\
+    ld      (bc),a\n\
+    dec     l\n\
+    jr      nz,.reset_probs\n\
+    push    hl\n\
+    exa\n\
+    jr      .decompress_start\n\
+.literal:\n\
+    inc     c\n\
+.decode_byte:\n\
+    call    nc,decode_bit\n\
+    rl      c\n\
+    jr      nc,.decode_byte\n\
+    ld      a,c\n\
+    exx\n\
+    ld      (de),a\n\
+    inc     de\n\
+    exx\n\
+    ld      d,b\n\
+.decompress_data:\n\
+    ld      c,0\n\
+.decompress_start:\n\
+    call    decode_bit\n\
+    jr      nc,.literal\n\
+.copy_chunk:\n\
+    ld      a,b\n\
+    inc     b\n\
+    cp      d\n\
+    call    nc,decode_bit\n\
+    jr      nc,.keep_offset\n\
+    pop     de\n\
+    call    decode_number\n\
+    dec     de\n\
+    ld      a,d\n\
+    or      e\n\
+    ret     z\n\
+    push    de\n\
+.keep_offset:\n\
+    ld      c,low(257 + NUMBER_BITS - 1)\n\
+    call    decode_number_nc\n\
+    push    de\n\
+    exx\n\
+    pop     bc\n\
+    pop     hl\n\
+    push    hl\n\
+    push    de\n\
+    ex      de,hl\n\
+    sbc     hl,de\n\
+    pop     de\n\
+    ldir\n\
+    exx\n\
+    ld      d,b\n\
+    djnz    .decompress_data\n\
+inc_c_decode_bit:\n\
+    inc     c\n\
+decode_bit:\n\
+    push    de\n\
+    bit     7,h\n\
+    jr      nz,.state_b15_set\n\
+    exa\n\
+.state_b15_zero:\n\
+    add     a,a\n\
+    jr      nz,.has_bit\n\
+    ld      a,(ix)\n\
+    inc     ix\n\
+    adc     a,a\n\
+.has_bit:\n\
+    adc     hl,hl\n\
+    jp      p,.state_b15_zero\n\
+    exa\n\
+.state_b15_set:\n\
+    ld      a,(bc)\n\
+    dec     a\n\
+    cp      l\n\
+    inc     a\n\
+    push    bc\n\
+    ld      c,l\n\
+    push    af\n\
+    jr      nc,.bit_is_0\n\
+    neg\n\
+.bit_is_0:\n\
+    ld      d,0\n\
+    ld      e,a\n\
+    ld      l,d\n\
+    ld      b,8\n\
+.mulLoop:\n\
+    add     hl,hl\n\
+    jr      nc,.mul0\n\
+    add     hl,de\n\
+.mul0:\n\
+    djnz    .mulLoop\n\
+    add     hl,bc\n\
+    pop     af\n\
+    jr      nc,.bit_is_0_2\n\
+    dec     d\n\
+    add     hl,de\n\
+.bit_is_0_2:\n\
+    rra\n\
+    and     $FC\n\
+    rra\n\
+    rra\n\
+    rra\n\
+    adc     a,-16\n\
+    ld      e,a\n\
+    pop     bc\n\
+    ld      a,(bc)\n\
+    sub     e\n\
+    ld      (bc),a\n\
+    add     a,d\n\
+    pop     de\n\
+    ret\n\
+decode_number:\n\
+    or      a\n\
+decode_number_nc:\n\
+    ld      de,$FFFF\n\
+.loop:\n\
+    call    c,inc_c_decode_bit\n\
+    rr      d\n\
+    rr      e\n\
+    call    inc_c_decode_bit\n\
+    jr      c,.loop\n\
+.fix_bit_pos:\n\
+    ccf\n\
+    rr      d\n\
+    rr      e\n\
+    jr      c,.fix_bit_pos\n\
+    ret\n\
+\n\
+probs:      EQU ($ + 255) & -$100\n\
+.real_c:    EQU 1 + 255 + 1 + 2*NUMBER_BITS\n\
+.c:         EQU (.real_c + 1) & -2\n\
+.e:         EQU probs + .c\n\
+\n\
+    ENDMODULE\n\
+    OPT pop\n\
+\n\
+    DS upkr.probs.e - $, 0  ; reserve workspace for probability tables\n'
+        },
+        // upkr (default config) has no ASM support - uses rANS byte encoding incompatible with Z80 depacker
+        shrinkler: {
+            setup: '    di\n    ld ix,packed_data\n    ld de,$4000\n    call shrinkler_decrunch\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Shrinkler z80 decompressor Madram/OVL version v8\n\
+; Modified by Ivan Gorodetsky (2019-10-06)\n\
+; input IX=source, DE=destination (must be even)\n\
+\n\
+probs = $6000\n\
+probs_ref = probs+$400\n\
+probs_length = probs_ref\n\
+probs_offset = probs_length+$200\n\
+\n\
+shrinkler_decrunch:\n\
+        exx\n\
+        ld hl,10*256+probs\n\
+        ld bc,10*256+$80\n\
+        xor a\n\
+init:\n\
+        dec h\n\
+iniloop:\n\
+        ld (hl),a\n\
+        inc l\n\
+        jr nz,iniloop\n\
+        xor c\n\
+        djnz init\n\
+        ld d,b\n\
+        ld e,b\n\
+        push de\n\
+        pop iy\n\
+        inc e\n\
+        ld a,c\n\
+        ex af,af\'\n\
+literal:\n\
+        scf\n\
+getlit:\n\
+        call nc,getbit\n\
+        rl l\n\
+        jr nc,getlit\n\
+        ld a,l\n\
+        exx\n\
+        ld (de),a\n\
+        inc de\n\
+        call getkind\n\
+        jr nc,literal\n\
+        ld h,probs_ref/256\n\
+        call getbit\n\
+        jr nc,readoffset\n\
+readlength:\n\
+        ld h,probs_length/256\n\
+        call getnumber\n\
+        push hl\n\
+        add hl,de\n\
+        ldir\n\
+        pop hl\n\
+        call getkind\n\
+        jr nc,literal\n\
+readoffset:\n\
+        ld h,probs_offset/256\n\
+        call getnumber\n\
+        ld hl,2\n\
+        sbc hl,bc\n\
+        exx\n\
+        jr nz,readlength\n\
+        ret\n\
+getnumber:\n\
+_numberloop:\n\
+        inc l\n\
+        inc l\n\
+        call getbit\n\
+        jr c,_numberloop\n\
+        exx\n\
+        ld bc,1\n\
+        exx\n\
+_bitsloop:\n\
+        dec l\n\
+        call getbit\n\
+        exx\n\
+        rl c\n\
+        rl b\n\
+        exx\n\
+        dec l\n\
+        jr nz,_bitsloop\n\
+        exx\n\
+        ret\n\
+readbit:\n\
+        ex de,hl\n\
+        add hl,hl\n\
+        ex de,hl\n\
+        ex af,af\'\n\
+        add a,a\n\
+        jr nz,_rbok\n\
+        ld a,(ix)\n\
+        inc ix\n\
+        adc a,a\n\
+_rbok:\n\
+        ex af,af\'\n\
+        add iy,iy\n\
+        ex af,af\'\n\
+        jr nc,$+4\n\
+        db $FD,$2C ; inc iyl\n\
+        ex af,af\'\n\
+        jr getbit\n\
+getkind:\n\
+        ld a,e\n\
+        exx\n\
+        ld hl,probs\n\
+        rra\n\
+        jr nc,getbit\n\
+        inc h\n\
+        inc h\n\
+getbit:\n\
+        ld a,d\n\
+        add a,a\n\
+        jr nc,readbit\n\
+        ld b,(hl)\n\
+        inc h\n\
+        ld c,(hl)\n\
+        push hl\n\
+        ld l,c\n\
+        ld h,b\n\
+        push bc\n\
+        ld a,%11100001\n\
+shift4:\n\
+        srl b\n\
+        rr c\n\
+        add a,a\n\
+        jr c,shift4\n\
+        sbc hl,bc\n\
+        pop bc\n\
+        push hl\n\
+        sbc hl,hl\n\
+muluw:\n\
+        add hl,hl\n\
+        rl c\n\
+        rl b\n\
+        jr nc,_mulcont\n\
+        add hl,de\n\
+        jr nc,_mulcont\n\
+        inc bc\n\
+_mulcont:\n\
+        dec a\n\
+        jr nz,muluw\n\
+        db $FD,$7D ; ld a,iyl\n\
+        sub c\n\
+        ld l,a\n\
+        db $FD,$7C ; ld a,iyh\n\
+        sbc a,b\n\
+        jr nc,zero\n\
+one:\n\
+        ld e,c\n\
+        ld d,b\n\
+        pop bc\n\
+        ld a,b\n\
+        sub $F0\n\
+        ld b,a\n\
+        dec bc\n\
+        jr _probret\n\
+zero:\n\
+        db $FD,$67 ; ld iyh,a\n\
+        ld a,l\n\
+        db $FD,$6F ; ld iyl,a\n\
+        ex de,hl\n\
+        sbc hl,bc\n\
+        ex de,hl\n\
+        pop bc\n\
+_probret:\n\
+        pop hl\n\
+        ld (hl),c\n\
+        dec h\n\
+        ld (hl),b\n\
+        ret\n'
+        },
+        aplib: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call DecompressApLib\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; ApLib decompressor based on spke & uniabis (140 bytes, standard format)\n\
+; HL: source address, DE: destination address\n\
+\n\
+    MACRO GET_BIT\n\
+        call GetOneBit\n\
+    ENDM\n\
+\n\
+    MACRO NEXT_HL\n\
+        inc hl\n\
+    ENDM\n\
+\n\
+    MACRO COPY_1\n\
+        ldi\n\
+    ENDM\n\
+\n\
+    MACRO COPY_BC\n\
+        ldir\n\
+    ENDM\n\
+\n\
+DecompressApLib:\n\
+        ld a,128\n\
+CASE0:\n\
+        COPY_1\n\
+ResetLWM:\n\
+        ld b,-1\n\
+MainLoop:\n\
+        GET_BIT : jr nc,CASE0\n\
+        GET_BIT : jr nc,CASE10\n\
+        ld bc,%11100000\n\
+        GET_BIT : jr nc,CASE110\n\
+CASE111:\n\
+ReadFourBits:\n\
+        GET_BIT\n\
+        rl c : jr c,ReadFourBits\n\
+        ex de,hl : jr z,WriteZero\n\
+        push hl\n\
+        sbc hl,bc\n\
+        ld c,(hl) : pop hl\n\
+        ld (hl),c : NEXT_HL\n\
+        ex de,hl : jr MainLoop\n\
+WriteZero:\n\
+        ld (hl),c : NEXT_HL\n\
+        ex de,hl : jr ResetLWM\n\
+CASE110:\n\
+        ld c,(hl) : rr c : ret z\n\
+        NEXT_HL\n\
+        push hl\n\
+        ld h,0 : ld l,c\n\
+        ld c,1 : rl c : jr SaveLWMOffset\n\
+CASE10:\n\
+        exa : ld a,b : exa\n\
+        call GetGammaCoded\n\
+        exa : add c : ld c,a : exa\n\
+        dec c : jr z,KickInLWM\n\
+        dec c\n\
+        ld b,c : ld c,(hl) : NEXT_HL\n\
+        push bc\n\
+        call GetGammaCoded\n\
+        ex (sp),hl\n\
+        exa : ld a,h\n\
+        cp 125 : jr nc,.Add2\n\
+        cp 5 : jr nc,.Add1\n\
+        jr .Add0\n\
+.Add2:  inc bc\n\
+.Add1:  inc bc\n\
+.Add0:  exa\n\
+SaveLWMOffset:\n\
+        push hl : pop ix\n\
+CopyMatch:\n\
+        push de\n\
+        ex de,hl : sbc hl,de\n\
+        pop de\n\
+        COPY_BC\n\
+        pop hl\n\
+        jr MainLoop\n\
+KickInLWM:\n\
+        call GetGammaCoded\n\
+        push ix : ex (sp),hl\n\
+        jr CopyMatch\n\
+GetGammaCoded:\n\
+        ld bc,1\n\
+ReadGamma:\n\
+        GET_BIT : rl c : rl b\n\
+        GET_BIT : ret nc\n\
+        jr ReadGamma\n\
+GetOneBit:\n\
+        add a : ret nz\n\
+ReloadByte:\n\
+        ld a,(hl) : NEXT_HL\n\
+        rla : ret\n'
+        },
+        lzsa2: {
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call DecompressLZSA2\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Size-optimized LZSA2 decompressor by spke & uniabis (134 bytes)\n\
+; HL: source address, DE: destination address\n\
+\n\
+    MACRO NEXT_HL\n\
+        inc hl\n\
+    ENDM\n\
+\n\
+    MACRO ADD_OFFSET\n\
+        add hl,de\n\
+    ENDM\n\
+\n\
+    MACRO BLOCKCOPY\n\
+        ldir\n\
+    ENDM\n\
+\n\
+DecompressLZSA2:\n\
+        xor a : ld b,a : exa : jr .ReadToken\n\
+.CASE00x:\n\
+        push af\n\
+        call ReadNibble.skipLDCA : ld c,a\n\
+        pop af\n\
+        cp %00100000 : rl c : jr .SaveOffset\n\
+.CASE0xx:\n\
+        dec b : cp %01000000 : jr c,.CASE00x\n\
+.CASE01x:\n\
+        cp %01100000\n\
+.doRLB: rl b\n\
+.OffsetReadC:\n\
+        ld c,(hl) : NEXT_HL\n\
+.SaveOffset:\n\
+        ld (.PrevOffset),bc : ld b,0\n\
+.MatchLen:\n\
+        and %00000111 : add 2 : cp 9\n\
+        call z,ExtendedCode\n\
+.CopyMatch:\n\
+        ld c,a\n\
+        push hl\n\
+.PrevOffset EQU $+1 : ld hl,0\n\
+        ADD_OFFSET\n\
+        BLOCKCOPY\n\
+        pop hl\n\
+.ReadToken:\n\
+        ld a,(hl) : NEXT_HL : push af\n\
+        and %00011000 : jr z,.NoLiterals\n\
+        rrca : rrca : rrca\n\
+        call pe,ExtendedCode\n\
+        ld c,a\n\
+        BLOCKCOPY\n\
+.NoLiterals:\n\
+        pop af : or a : jp p,.CASE0xx\n\
+.CASE1xx:\n\
+        cp %11000000 : jr c,.CASE10x\n\
+        cp %11100000 : jr nc,.MatchLen\n\
+.CASE110:\n\
+        ld b,(hl) : NEXT_HL : jr .OffsetReadC\n\
+.CASE10x:\n\
+        call ReadNibble : ld b,a\n\
+        ld a,c : cp %10100000\n\
+        dec b : jr .doRLB\n\
+ExtendedCode:\n\
+        call ReadNibble : inc a : jr z,ExtraByte\n\
+        sub $F0+1 : add c : ret\n\
+ExtraByte:\n\
+        ld a,15 : add c : add (hl) : NEXT_HL : ret nc\n\
+        ld a,(hl) : NEXT_HL\n\
+        ld b,(hl) : NEXT_HL : ret nz\n\
+        pop bc\n\
+ReadNibble:\n\
+        ld c,a\n\
+.skipLDCA:\n\
+        xor a : exa : ret m\n\
+        ld a,(hl) : or $F0 : exa\n\
+        ld a,(hl) : NEXT_HL : or $0F\n\
+        rrca : rrca : rrca : rrca : ret\n'
+        },
+        hrust: {
+            setup: '    di\n    ld hl,packed_data+6\n    ld de,$5AFA\n    ld bc,6\n    ldir\n    ld hl,packed_data+12\n    ld de,$4000\n    call dehrust\n    ei\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; Z80 HRUST depacker (uses stack)\n\
+; HL = source, DE = destination\n\
+; WARNING: uses stack for reading, run with DI\n\
+\n\
+dehrust:\n\
+        LD IX,0\n\
+        ADD IX,SP\n\
+        LD SP,HL\n\
+        LD B,0\n\
+        EXX\n\
+        LD D,$BF\n\
+        LD BC,$1010\n\
+        POP HL\n\
+loc_6037:\n\
+        DEC SP\n\
+        POP AF\n\
+        EXX\n\
+loc_603A:\n\
+        LD (DE),A\n\
+        INC DE\n\
+loc_603C:\n\
+        EXX\n\
+loc_603D:\n\
+        ADD HL,HL\n\
+        DJNZ loc_6042\n\
+        POP HL\n\
+        LD B,C\n\
+loc_6042:\n\
+        JR C,loc_6037\n\
+        LD E,1\n\
+loc_6046:\n\
+        LD A,$80\n\
+loc_6048:\n\
+        ADD HL,HL\n\
+        DJNZ loc_604D\n\
+        POP HL\n\
+        LD B,C\n\
+loc_604D:\n\
+        RLA\n\
+        JR C,loc_6048\n\
+        CP 3\n\
+        JR C,loc_6059\n\
+        ADD A,E\n\
+        LD E,A\n\
+        XOR C\n\
+        JR NZ,loc_6046\n\
+loc_6059:\n\
+        ADD A,E\n\
+        CP 4\n\
+        JR Z,loc_60B8\n\
+        ADC A,$FF\n\
+        CP 2\n\
+        EXX\n\
+loc_6063:\n\
+        LD C,A\n\
+loc_6064:\n\
+        EXX\n\
+        LD A,$BF\n\
+        JR C,loc_607D\n\
+loc_6069:\n\
+        ADD HL,HL\n\
+        DJNZ loc_606E\n\
+        POP HL\n\
+        LD B,C\n\
+loc_606E:\n\
+        RLA\n\
+        JR C,loc_6069\n\
+        JR Z,loc_6078\n\
+        INC A\n\
+        ADD A,D\n\
+        JR NC,loc_607F\n\
+        SUB D\n\
+loc_6078:\n\
+        INC A\n\
+        JR NZ,loc_6087\n\
+        LD A,$EF\n\
+loc_607D:\n\
+        RRCA\n\
+        CP A\n\
+loc_607F:\n\
+        ADD HL,HL\n\
+        DJNZ loc_6084\n\
+        POP HL\n\
+        LD B,C\n\
+loc_6084:\n\
+        RLA\n\
+        JR C,loc_607F\n\
+loc_6087:\n\
+        EXX\n\
+        LD H,-1\n\
+        JR Z,loc_6092\n\
+        LD H,A\n\
+        DEC SP\n\
+        INC A\n\
+        JR Z,loc_609D\n\
+        POP AF\n\
+loc_6092:\n\
+        LD L,A\n\
+        ADD HL,DE\n\
+        LDIR\n\
+loc_6096:\n\
+        JR loc_603C\n\
+loc_6098:\n\
+        EXX\n\
+        RRC D\n\
+        JR loc_603D\n\
+loc_609D:\n\
+        POP AF\n\
+        CP $E0\n\
+        JR C,loc_6092\n\
+        RLCA\n\
+        XOR C\n\
+        INC A\n\
+        JR Z,loc_6098\n\
+        SUB $10\n\
+loc_60A9:\n\
+        LD L,A\n\
+        LD C,A\n\
+        LD H,$FF\n\
+        ADD HL,DE\n\
+        LDI\n\
+        DEC SP\n\
+        POP AF\n\
+        LD (DE),A\n\
+        INC HL\n\
+        INC DE\n\
+        LD A,(HL)\n\
+        JR loc_603A\n\
+loc_60B8:\n\
+        LD A,$80\n\
+loc_60BA:\n\
+        ADD HL,HL\n\
+        DJNZ loc_60BF\n\
+        POP HL\n\
+        LD B,C\n\
+loc_60BF:\n\
+        ADC A,A\n\
+        JR NZ,loc_60DB\n\
+        JR C,loc_60BA\n\
+        LD A,$FC\n\
+        JR loc_60DE\n\
+loc_60C8:\n\
+        DEC SP\n\
+        POP BC\n\
+        LD C,B\n\
+        LD B,A\n\
+        CCF\n\
+        JR loc_6064\n\
+loc_60CF:\n\
+        CP $0F\n\
+        JR C,loc_60C8\n\
+        JR NZ,loc_6063\n\
+        LD SP,IX\n\
+        RET\n\
+loc_60DB:\n\
+        SBC A,A\n\
+        LD A,$EF\n\
+loc_60DE:\n\
+        ADD HL,HL\n\
+        DJNZ loc_60E3\n\
+        POP HL\n\
+        LD B,C\n\
+loc_60E3:\n\
+        RLA\n\
+        JR C,loc_60DE\n\
+        EXX\n\
+        JR NZ,loc_60A9\n\
+        BIT 7,A\n\
+        JR Z,loc_60CF\n\
+        SUB $EA\n\
+        EX DE,HL\n\
+loc_60F0:\n\
+        POP DE\n\
+        LD (HL),E\n\
+        INC HL\n\
+        LD (HL),D\n\
+        INC HL\n\
+        DEC A\n\
+        JR NZ,loc_60F0\n\
+        EX DE,HL\n\
+        JR loc_6096\n'
+        },
+        rip: {
+            setup: '    ld ix,packed_data\n    ld de,$4000-1\n    call derip\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; RIP depacker (228 bytes) by uniabis\n\
+; IX = source, DE = dest-1\n\
+\n\
+workarea=$6000\n\
+maintree=workarea\n\
+tree=maintree+$120*4\n\
+bitlens2=tree+$120\n\
+\n\
+derip:\n\
+        PUSH DE\n\
+        LD BC,$1201\n\
+        LD DE,tree-1\n\
+        PUSH DE\n\
+L0:     LD A,$10\n\
+L1:     CALL mWBIT\n\
+        RLA\n\
+        JR NC, L1\n\
+        INC DE\n\
+        LD (DE),A\n\
+        DJNZ L0\n\
+        PUSH BC\n\
+        LD DE,18+1\n\
+        CALL mMTRE\n\
+        POP BC\n\
+        POP DE\n\
+GETLEN0:\n\
+        CALL mHFMAI\n\
+        CP 16\n\
+        JR C, GETLEN_\n\
+        LD A,(DE)\n\
+        INC DE\n\
+        LD (DE),A\n\
+GETLEN_:\n\
+        INC DE\n\
+        LD (DE),A\n\
+        JR NZ, GETLEN0\n\
+GETLENQ:\n\
+        PUSH BC\n\
+        LD DE,$0120+1\n\
+        CALL mMTRE\n\
+        LD HL,bitlens2-2\n\
+        LD DE,32+1\n\
+        EXX\n\
+        LD DE,tree\n\
+        CALL mTRE\n\
+        POP BC\n\
+        POP DE\n\
+MAINLOOP2:\n\
+        INC DE\n\
+MAINLOOP1:\n\
+        CALL mHFMAI\n\
+        LD (DE),A\n\
+        DEC H\n\
+        JR NZ, MAINLOOP2\n\
+        OR A\n\
+        RET Z\n\
+        CALL LLEN\n\
+        PUSH HL\n\
+        LD HL,tree\n\
+        CALL mHFM\n\
+        OR A\n\
+        JR Z, CPY1\n\
+        CALL LLEN\n\
+        LD (MOFFSET+1), HL\n\
+        LD A,H\n\
+        OR A\n\
+CPY1:\n\
+        LD A,C\n\
+        POP BC\n\
+        JR Z, $+3\n\
+        INC BC\n\
+COPY:\n\
+        PUSH DE\n\
+        EX DE,HL\n\
+MOFFSET:\n\
+        LD DE, 0\n\
+        SBC HL,DE\n\
+        POP DE\n\
+        LDIR\n\
+        LD C,A\n\
+        JR MAINLOOP1\n\
+mWBIT:\n\
+        SRL C\n\
+        RET NZ\n\
+mWBYTE:\n\
+        LD C,(IX)\n\
+        INC IX\n\
+        RR C\n\
+        RET\n\
+mMTRE:\n\
+        LD HL,tree-2\n\
+        EXX\n\
+        LD DE,maintree\n\
+mTRE:\n\
+        LD H,D\n\
+        LD L,E\n\
+        XOR A\n\
+        PUSH AF\n\
+        INC A\n\
+        PUSH HL,AF\n\
+        LD C,A\n\
+mTRE0:\n\
+        EXX\n\
+        LD B,D\n\
+        LD C,E\n\
+        ADD HL,BC\n\
+        EXX\n\
+mTRE1:\n\
+        LD B,A\n\
+        LD A,C\n\
+        EXX\n\
+        CPDR\n\
+        LD A,B\n\
+        OR C\n\
+        EXX\n\
+        LD A,B\n\
+        JR NZ, mTREY\n\
+        INC C\n\
+        JR mTRE0\n\
+mTREdip:\n\
+        INC E,DE,E,DE\n\
+        LD (HL),D\n\
+        INC L\n\
+        LD (HL),E\n\
+        LD H,D\n\
+        LD L,E\n\
+        INC A\n\
+        PUSH HL,AF\n\
+mTREY:\n\
+        CP C\n\
+        JR NZ, mTREdip\n\
+        EXX\n\
+        PUSH BC\n\
+        EXX\n\
+        POP BC\n\
+        DEC BC\n\
+        LD (HL),B\n\
+        INC L\n\
+        LD (HL),C\n\
+        LD C,A\n\
+        POP AF\n\
+        RET Z\n\
+        POP HL\n\
+        INC L,HL\n\
+        JR mTRE1\n\
+LLEN:\n\
+        ADD A,-5\n\
+        RET NC\n\
+        LD L,1\n\
+        ADC A,L\n\
+        RRA\n\
+        RL L\n\
+        CALL mWBIT\n\
+        ADC HL,HL\n\
+        DEC A\n\
+        JR NZ, $-6\n\
+        INC HL\n\
+        RET\n\
+mHFMAI:\n\
+        LD HL,maintree\n\
+mHFM:\n\
+        CALL mWBIT\n\
+        JR NC, $+4\n\
+        INC L,HL\n\
+        LD A,(HL)\n\
+        INC L\n\
+        CP H\n\
+        LD L,(HL)\n\
+        LD H,A\n\
+        JR NC, mHFM\n\
+        LD A,L\n\
+        RET\n'
+        },
+        mrip: {
+            setup: '    ld ix,packed_data\n    ld de,$4000-1\n    call demrip\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; mRIP depacker (218 bytes) by uniabis\n\
+; IX = source, DE = dest-1\n\
+\n\
+workarea=$6081\n\
+maintree=workarea\n\
+tree=maintree+$120*4\n\
+bitlens2=tree+$120\n\
+\n\
+demrip:\n\
+        PUSH DE\n\
+        LD C,1\n\
+        LD DE,tree+17\n\
+L0:     LD A,$10\n\
+L1:     CALL mWBIT\n\
+        RLA\n\
+        JR NC, L1\n\
+        LD (DE),A\n\
+        DEC E\n\
+        JR NZ, L0\n\
+        PUSH DE\n\
+        PUSH BC\n\
+        LD DE,18+1\n\
+        CALL mMTRE\n\
+        POP BC\n\
+        POP DE\n\
+GETLEN0:\n\
+        CALL mHFMAI\n\
+        CP 16\n\
+        JR C, GETLEN_\n\
+        LD A,(DE)\n\
+        INC DE\n\
+        LD (DE),A\n\
+GETLEN_:\n\
+        INC DE\n\
+        LD (DE),A\n\
+        JR NZ, GETLEN0\n\
+GETLENQ:\n\
+        PUSH BC\n\
+        LD DE,$0120+1\n\
+        CALL mMTRE\n\
+        LD HL,bitlens2-2\n\
+        LD DE,32+1\n\
+        EXX\n\
+        LD DE,tree\n\
+        CALL mTRE\n\
+        POP BC\n\
+        POP DE\n\
+MAINLOOP2:\n\
+        INC DE\n\
+MAINLOOP1:\n\
+        CALL mHFMAI\n\
+        LD (DE),A\n\
+        DEC H\n\
+        JR NZ, MAINLOOP2\n\
+        OR A\n\
+        RET Z\n\
+        CALL LLEN\n\
+        PUSH HL\n\
+        LD HL,tree\n\
+        CALL mHFM\n\
+        CALL LLEN\n\
+        PUSH DE\n\
+        EX DE,HL\n\
+        SBC HL,DE\n\
+        INC D : DEC D\n\
+        POP DE\n\
+        LD A,C\n\
+        POP BC\n\
+        JR Z, $+3\n\
+        INC BC\n\
+        LDIR\n\
+        LD C,A\n\
+        JR MAINLOOP1\n\
+mWBIT:\n\
+        SRL C\n\
+        RET NZ\n\
+mWBYTE:\n\
+        LD C,(IX)\n\
+        INC IX\n\
+        RR C\n\
+        RET\n\
+mMTRE:\n\
+        LD HL,tree-2\n\
+        EXX\n\
+        LD DE,maintree\n\
+mTRE:\n\
+        LD H,D\n\
+        LD L,E\n\
+        XOR A\n\
+        PUSH AF\n\
+        INC A\n\
+        PUSH HL,AF\n\
+        LD C,A\n\
+mTRE0:\n\
+        EXX\n\
+        LD B,D\n\
+        LD C,E\n\
+        ADD HL,BC\n\
+        EXX\n\
+mTRE1:\n\
+        LD B,A\n\
+        LD A,C\n\
+        EXX\n\
+        CPDR\n\
+        LD A,B\n\
+        OR C\n\
+        EXX\n\
+        LD A,B\n\
+        JR NZ, mTREY\n\
+        INC C\n\
+        JR mTRE0\n\
+mTREdip:\n\
+        INC DE,DE,DE,DE\n\
+        LD (HL),D\n\
+        INC HL\n\
+        LD (HL),E\n\
+        LD H,D\n\
+        LD L,E\n\
+        INC A\n\
+        PUSH HL,AF\n\
+mTREY:\n\
+        CP C\n\
+        JR NZ, mTREdip\n\
+        EXX\n\
+        PUSH BC\n\
+        EXX\n\
+        POP BC\n\
+        DEC BC\n\
+        LD (HL),B\n\
+        INC HL\n\
+        LD (HL),C\n\
+        LD C,A\n\
+        POP AF\n\
+        RET Z\n\
+        POP HL\n\
+        INC HL,HL\n\
+        JR mTRE1\n\
+LLEN:\n\
+        ADD A,-5\n\
+        RET NC\n\
+        LD L,1\n\
+        ADC A,L\n\
+        RRA\n\
+        RL L\n\
+        CALL mWBIT\n\
+        ADC HL,HL\n\
+        DEC A\n\
+        JR NZ, $-6\n\
+        INC HL\n\
+        RET\n\
+mHFMAI:\n\
+        LD HL,maintree\n\
+mHFM:\n\
+        CALL mWBIT\n\
+        JR NC, $+4\n\
+        INC HL,HL\n\
+        LD A,(HL)\n\
+        INC HL\n\
+        CP H\n\
+        LD L,(HL)\n\
+        LD H,A\n\
+        JR NC, mHFM\n\
+        LD A,L\n\
+        RET\n'
+        },
+        bb12: {
+            dataOffset: 4, // skip 4-byte LE length header
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call depack\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; BitBuster 1.2 depacker by Team Bomba\n\
+; HL: source address, DE: destination address\n\
+\n\
+depack:\n\
+        ld a,128\n\
+        exx\n\
+        ld de,1\n\
+        exx\n\
+depack_loop:\n\
+        call getbits\n\
+        jr c,output_compressed\n\
+        ldi\n\
+        jr depack_loop\n\
+output_compressed:\n\
+        ld c,(hl)\n\
+        inc hl\n\
+output_match:\n\
+        ld b,0\n\
+        bit 7,c\n\
+        jr z,output_match1\n\
+        call getbits\n\
+        call rlbgetbits\n\
+        call rlbgetbits\n\
+        call rlbgetbits\n\
+        jr c,output_match1\n\
+        res 7,c\n\
+output_match1:\n\
+        inc bc\n\
+        exx\n\
+        ld h,d\n\
+        ld l,e\n\
+        ld b,e\n\
+get_gamma_value_size:\n\
+        exx\n\
+        call getbits\n\
+        exx\n\
+        jr nc,get_gamma_value_size_end\n\
+        inc b\n\
+        jr get_gamma_value_size\n\
+get_gamma_value_bits:\n\
+        exx\n\
+        call getbits\n\
+        exx\n\
+        adc hl,hl\n\
+get_gamma_value_size_end:\n\
+        djnz get_gamma_value_bits\n\
+get_gamma_value_end:\n\
+        inc hl\n\
+        exx\n\
+        ret c\n\
+        push hl\n\
+        exx\n\
+        push hl\n\
+        exx\n\
+        ld h,d\n\
+        ld l,e\n\
+        sbc hl,bc\n\
+        pop bc\n\
+        ldir\n\
+        pop hl\n\
+        jr depack_loop\n\
+rlbgetbits:\n\
+        rl b\n\
+getbits:\n\
+        add a,a\n\
+        ret nz\n\
+        ld a,(hl)\n\
+        inc hl\n\
+        rla\n\
+        ret\n'
+        },
+        bb2: {
+            dataOffset: 3, // skip 1-byte block count + 2-byte block length header
+            setup: '    ld hl,packed_data\n    ld de,$4000\n    call unbitbuster2\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n',
+            depacker:
+'; BitBuster 2 depacker (c) 2003-2004,2022 Arjan Bakker, MIT License\n\
+; Modified by uniabis - single block support\n\
+; HL: source address, DE: destination address\n\
+\n\
+unbitbuster2:\n\
+.block:\n\
+        scf\n\
+        jr .fill_bitbuffer_inline\n\
+.get_offset:\n\
+        ld e, (hl)\n\
+        inc hl\n\
+        bit 7, e\n\
+        jr z, .offsetbits7\n\
+        call .get_bit\n\
+        call .rld_and_get_bit\n\
+        call .rld_and_get_bit\n\
+        call .rld_and_get_bit\n\
+        jr c, .calc_source\n\
+        res 7, e\n\
+.offsetbits7:\n\
+        scf\n\
+.calc_source:\n\
+        ex (sp), hl\n\
+        push hl\n\
+        sbc hl, de\n\
+        pop de\n\
+        ldir\n\
+        ldi\n\
+        pop hl\n\
+        add a, a\n\
+        jr nc, .literal\n\
+        jr nz, .get_length\n\
+.fill_bitbuffer_inline:\n\
+        ld a, (hl)\n\
+        inc hl\n\
+        adc a, a\n\
+        jr c, .get_length\n\
+.literal:\n\
+        ldi\n\
+.loop:\n\
+        add a, a\n\
+        jr nc, .literal\n\
+        jr z, .fill_bitbuffer_inline\n\
+.get_length:\n\
+        push de\n\
+        ld bc, 1\n\
+        ld d, b\n\
+.get_length_loop:\n\
+        call .get_bit\n\
+        jr nc, .get_offset\n\
+        call .get_bit\n\
+        rl c\n\
+        rl b\n\
+        jr nc, .get_length_loop\n\
+        pop de\n\
+.rld_and_get_bit:\n\
+        rl d\n\
+.get_bit:\n\
+        add a, a\n\
+        ret nz\n\
+.fill_bitbuffer:\n\
+        ld a, (hl)\n\
+        inc hl\n\
+        adc a, a\n\
+        ret\n'
+        }
+    };
+
+    // upkr (default config) is not Z80-depacker compatible, no ASM support
+
+    // ---- LgK dynamic ASM generator ----
+
+    function parseLgkHeader(data) {
+        let pos = 0;
+        function readBit() { const byteIdx = pos >> 3; const bitIdx = 7 - (pos & 7); pos++; return (data[byteIdx] >> bitIdx) & 1; }
+        function readBits(n) { let v = 0; for (let i = 0; i < n; i++) v = v * 2 + readBit(); return v; }
+
+        const cfg = new Array(17).fill(0);
+        cfg[16] = 1 - readBit();           // CFASEP
+        const monoFlag = readBit();         // mono flag
+        if (monoFlag) cfg[11] = 1; else cfg[11] = 256; // CFDIFA
+        cfg[0] = readBits(2);              // CFGRP
+        cfg[13] = readBits(2);             // CFAREM
+        const alzero = readBit();
+        cfg[12] = readBit();               // CFFLASH
+        let prevPred = 0;
+        if (cfg[11] === 1) {
+            prevPred = readBits(8); cfg[14] = 0; // CFAREB=0
+        } else {
+            cfg[14] = readBits(8) - 1;     // CFAREB
+        }
+        cfg[15] = readBits(8) - 1;         // CFARLEB
+        if (cfg[15] === 0) cfg[15] = 1;
+        cfg[4] = readBits(8);              // CFVB1
+        cfg[6] = readBits(8);              // CFVB2
+        cfg[7] = readBits(7) & 1;          // CFHB2
+        cfg[5] = readBit();                // CFHB1
+        cfg[1] = readBits(7);              // CFREB
+        cfg[2] = readBit();                // CFRPR
+        cfg[3] = 0;                        // CFINV always 0 in JS
+
+        const treeSize = readBits(8);
+        const modeTree = new Array(14).fill(0);
+        for (let i = 0; i < treeSize; i++) {
+            const x = readBits(8);
+            if (x <= 7) modeTree[i] = x;
+            else modeTree[i] = x;          // branch values >=0xE1
+        }
+
+        const palCount = readBits(8) - (alzero ? 1 : 0);
+        if (!alzero) cfg[11] = palCount;    // CFDIFA
+        const attrPalette = [];
+        for (let i = 0; i < palCount; i++) attrPalette.push(readBits(8));
+
+        const mono = (cfg[11] === 1);
+        const headerBytes = (pos + 7) >> 3;
+        return { cfg, mono, prevPred, modeTree, attrPalette, palCount, headerBytes };
+    }
+
+    function lgkDepcalc(cfg) {
+        // Label indices
+        const L = { _xorri:0, _xorre:1, _xtinv:2, _xorh2:3, _xorv2:4, _xorh1:5, _xorv1:6,
+            _noxor:7, _xmtree:8, _cellcode:9, _twalk:10, _getbit:11, _fillbits:12, _ldrpr:13,
+            _xvini:14, _tiledepack:15, _twindepack:16, _attrle:17, _attree:18, _cctree:19,
+            _adepack:20, _trun:21, _adreps:22, _adsaverle:23, _adrepl:24, _getbits:25,
+            _adnorh:26, _altabl:27, _adnorv:28, _adrepv:29, _adskil:30, _adresl:31,
+            _adskir:32, _adresr:33, _altab:34 };
+        const zxofs = new Array(35).fill(-1);
+        let sz = 0;
+
+        // Fragment sizes (first byte of each C array)
+        const SZ_start = 7;
+        const SZ_depack_asep = 40, SZ_depack_amix = 42, SZ_depack_bics = 33, SZ_depack_bicm = 34;
+        const SZ_cctwalk = 22, SZ_getbit = 11;
+        const SZ_xorr8reb = 14, SZ_xorr8rpr = 24, SZ_xorrLreb = 24, SZ_xorrLrpr = 38;
+        const SZ_xorv = 50, SZ_xorvLref = 53, SZ_xorh = 44;
+        const SZ_tileclear = 8, SZ_quafdepack = 35, SZ_sixtdepack = 30;
+        const SZ_adepack = 3, SZ_adeprle = 8;
+        const SZ_trun = 10, SZ_truna5 = 11, SZ_trunLref = 12;
+        const SZ_adrepsrle = 9, SZ_adreps5 = 6, SZ_adreps3 = 3;
+        const SZ_adnorh3 = 8, SZ_adnorv3 = 10, SZ_adnorh5 = 15, SZ_adnorv5 = 18;
+        const SZ_almode0 = 17, SZ_almode1v = 13, SZ_almode1x = 14;
+        const SZ_getbits = 10;
+        const QUARS = 1;
+
+        // start fragment
+        if (cfg[16]) sz += SZ_start + 1; // +1 for the extra byte in appendep (zxbin[0]+1 = 7+1=8?)
+        else sz += SZ_start + 1;
+        // Actually: appendep copies zxbin[0] bytes (the size value), so start is 7 bytes.
+        // Then "if !undins" adds 2 bytes (ld c,$80)
+        // Let me recalculate properly:
+        // start: 7 bytes
+        sz = 7;
+        // depack variant
+        if (cfg[16]) { // CFASEP
+            if (cfg[11] > 1) sz += SZ_depack_asep; // CFDIFA
+            else sz += SZ_depack_bics;
+        } else {
+            if (cfg[11] > 1) sz += SZ_depack_amix;
+            else sz += SZ_depack_bicm;
+        }
+        // undins=false, so +2 for "ld c,$80"
+        sz += 2;
+
+        zxofs[L._xmtree] = sz;
+        sz += 14;
+
+        zxofs[L._cellcode] = sz;
+        zxofs[L._twalk] = sz + 3;
+        sz += SZ_cctwalk;
+
+        zxofs[L._getbit] = sz;
+        zxofs[L._fillbits] = sz + 3;
+        sz += SZ_getbit;
+
+        zxofs[L._xorri] = sz;
+        zxofs[L._xorre] = sz + 1;
+        if (cfg[1] < 9) { // CFREB
+            if (cfg[2]) { // CFRPR
+                zxofs[L._ldrpr] = sz + 7;
+                sz += SZ_xorr8rpr;
+            } else sz += SZ_xorr8reb;
+        } else {
+            if (cfg[2]) {
+                zxofs[L._ldrpr] = sz + 28;
+                sz += SZ_xorrLrpr;
+            } else sz += SZ_xorrLreb;
+        }
+
+        zxofs[L._xorv2] = sz;
+        zxofs[L._xtinv] = sz + 1;
+        zxofs[L._xorv1] = sz + 4;
+        zxofs[L._xvini] = sz + 13;
+        if (cfg[1] < 9) sz += SZ_xorv;
+        else sz += SZ_xorvLref;
+        zxofs[L._noxor] = sz - 1;
+
+        zxofs[L._xorh1] = sz;
+        zxofs[L._xorh2] = sz + 1;
+        sz += SZ_xorh;
+
+        zxofs[L._tiledepack] = sz;
+        if (cfg[0] > QUARS) sz += SZ_tileclear; // CFGRP
+        if (QUARS & cfg[0]) sz += SZ_quafdepack;
+        else sz += SZ_sixtdepack;
+
+        if (cfg[11] > 1) { // CFDIFA
+            if (cfg[15] > 1) { zxofs[L._attrle] = sz; sz++; } // CFARLEB
+            zxofs[L._attree] = sz;
+            if (cfg[13] > 1) sz += 8; // CFAREM
+            else sz += 4;
+        }
+
+        zxofs[L._cctree] = sz;
+        sz += 30;
+
+        if (cfg[11] > 1) {
+            zxofs[L._adepack] = sz;
+            if (cfg[15] > 1) sz += SZ_adeprle; // CFARLEB
+            else sz += SZ_adepack;
+        }
+
+        zxofs[L._trun] = sz;
+        if (cfg[1] > 8) sz += SZ_trunLref;
+        else if ((cfg[11] > 1) && (cfg[13] > 1)) sz += SZ_truna5;
+        else sz += SZ_trun;
+
+        if (cfg[11] > 1) { // CFDIFA
+            if (cfg[13] > 1) { // CFAREM
+                zxofs[L._adreps] = sz;
+                if (cfg[15] > 1) { // CFARLEB
+                    zxofs[L._adsaverle] = sz + 6;
+                    sz += SZ_adrepsrle + 1; // +1 for "xor a"
+                }
+                sz += SZ_adreps5;
+            }
+
+            zxofs[L._adrepl] = sz;
+            if (cfg[14] > 0) { // CFAREB
+                if (1 & cfg[13]) { // CFAREM
+                    if (cfg[11] <= (1 << cfg[14])) sz += SZ_almode1v;
+                    else sz += SZ_almode1x;
+                } else sz += SZ_almode0;
+            } else sz += 2; // "ld b,N"
+        }
+
+        zxofs[L._getbits] = sz;
+        sz += SZ_getbits;
+
+        if (cfg[11] > 1) { // CFDIFA
+            if (cfg[13] > 1) { // CFAREM
+                zxofs[L._adnorh] = sz;
+                zxofs[L._adskil] = sz + 2;
+                zxofs[L._adresl] = sz + 7;
+                sz += SZ_adnorh5;
+                zxofs[L._adnorv] = sz;
+                zxofs[L._adskir] = sz + 2;
+                zxofs[L._adresr] = sz + 7;
+                zxofs[L._altabl] = sz + 11;
+                sz += SZ_adnorv5;
+            } else {
+                zxofs[L._adreps] = sz;
+                if (cfg[15] > 1) { // CFARLEB
+                    zxofs[L._adsaverle] = sz + 6;
+                    sz += SZ_adrepsrle;
+                }
+                sz += SZ_adreps3;
+                zxofs[L._adnorh] = sz;
+                sz += SZ_adnorh3;
+                zxofs[L._adnorv] = sz;
+                zxofs[L._adrepv] = sz + 3;
+                zxofs[L._altabl] = sz + 7;
+                sz += SZ_adnorv3;
+            }
+            zxofs[L._altab] = sz;
+        }
+
+        return { zxofs, depSize: sz, L };
+    }
+
+    function generateLgkAsm(compressedData, id) {
+        const hdr = parseLgkHeader(compressedData);
+        const cfg = hdr.cfg;
+        const { zxofs, depSize, L } = lgkDepcalc(cfg);
+        const QUARS = 1;
+
+        // Compute arefs (palette table size in depacker)
+        let arefs = 0;
+        if (cfg[11] > 1) { // CFDIFA
+            arefs = (1 << cfg[14]); // CFAREB
+            if ((arefs > 0) && (1 & cfg[13])) { // CFAREM
+                if (cfg[11] > arefs) arefs--;
+                else arefs = cfg[11];
+            }
+        }
+
+        const compName = (getActiveCompressors().find(x => x.id === id) || {}).name || id;
+        const hex = v => '$' + ((v & 0xFF).toString(16).toUpperCase().padStart(2, '0'));
+
+        // Build a binary depacker image (like the C code does), then emit as db with labels.
+        // This replicates zxdepgen() exactly.
+        const afterdep = depSize + arefs;
+        const bufSize = afterdep + 16;
+        const depbuf = new Uint8Array(bufSize);
+        let depbufree = 0;
+        let thistart = 0;
+
+        function appendep(bytes) {
+            thistart = depbufree;
+            for (let i = 0; i < bytes.length; i++) depbuf[depbufree++] = bytes[i];
+        }
+        function wpoke(ofs, word) {
+            // In the C code, wpoke writes (zxorg + word). Since we'll resolve addresses
+            // via labels, we store word as-is (the depacker-relative offset).
+            // We track wpoke calls separately for label resolution.
+            depbuf[thistart + ofs] = word & 0xFF;
+            depbuf[thistart + ofs + 1] = (word >> 8) & 0xFF;
+        }
+
+        // We need to track all wpoke patches so we can emit dw labels instead of raw bytes.
+        // Each patch: { absPos: absolute byte position, labelOfs: depacker offset }
+        const patches = [];
+        const bytePatch = []; // single-byte patches at absolute positions with comments
+        function wpokeTracked(ofs, word, label) {
+            const absPos = thistart + ofs;
+            patches.push({ absPos: absPos, target: word, label: label });
+            wpoke(ofs, 0); // placeholder
+        }
+
+        // --- Fragment 1: start ---
+        if (cfg[16]) // CFASEP
+            appendep([0xDD, 0x21, 0x00, 0x00, 0x21, 0x00, 0x40]);
+        else
+            appendep([0xDD, 0x21, 0x00, 0x00, 0x21, 0x00, 0x58]);
+        wpokeTracked(2, afterdep, 'packed_data');
+
+        // ld c,$80 (undins=false)
+        depbuf[depbufree++] = 0x0E;
+        depbuf[depbufree++] = 0x80;
+
+        // --- Fragment 2: depack loop ---
+        if (cfg[11] > 1) { // CFDIFA > 1
+            if (cfg[16]) { // CFASEP
+                appendep([0xE5,0xE5,0xCD,0x00,0x00,0xE1,0x11,0x00,0x00,0xCD,
+                    0x00,0x00,0xE1,0x2C,0x20,0xF0,0x7C,0xC6,0x08,0x67,
+                    0xD6,0x58,0x20,0xE8,0x77,0xE5,0xCD,0x00,0x00,0xE1,
+                    0x46,0x77,0x23,0x7C,0xFE,0x5B,0x78,0x20,0xF1,0xC9]);
+                wpokeTracked(3, zxofs[L._tiledepack], 'tiledepack');
+                wpokeTracked(7, zxofs[L._xmtree], 'xmtree');
+                wpokeTracked(10, zxofs[L._trun], 'trun');
+                wpokeTracked(27, zxofs[L._adepack], 'adepack');
+            } else {
+                appendep([0x75,0xE5,0x26,0x40,0xE5,0xE5,0xCD,0x00,0x00,0xE1,
+                    0x11,0x00,0x00,0xCD,0x00,0x00,0xE1,0xE3,0xE5,0xCD,
+                    0x00,0x00,0xE1,0x46,0x77,0xD1,0x1C,0x20,0x07,0x7A,
+                    0xC6,0x08,0x57,0xFE,0x58,0xC8,0x23,0x70,0xE5,0xEB,
+                    0x18,0xDA]);
+                wpokeTracked(7, zxofs[L._tiledepack], 'tiledepack');
+                wpokeTracked(11, zxofs[L._xmtree], 'xmtree');
+                wpokeTracked(14, zxofs[L._trun], 'trun');
+                wpokeTracked(20, zxofs[L._adepack], 'adepack');
+            }
+        } else { // mono
+            if (cfg[16]) { // BICS
+                appendep([0xE5,0xE5,0xCD,0x00,0x00,0xE1,0x11,0x00,0x00,0xCD,
+                    0x00,0x00,0xE1,0x2C,0x20,0xF0,0x7C,0xC6,0x08,0x67,
+                    0xD6,0x58,0x20,0xE8,0x36,0x04,0x23,0x7C,0xFE,0x5B,
+                    0x20,0xF8,0xC9]);
+                wpokeTracked(3, zxofs[L._tiledepack], 'tiledepack');
+                wpokeTracked(7, zxofs[L._xmtree], 'xmtree');
+                wpokeTracked(10, zxofs[L._trun], 'trun');
+                depbuf[thistart + 25] = hdr.prevPred;
+            } else { // BICM
+                appendep([0xE5,0x26,0x40,0xE5,0xE5,0xCD,0x00,0x00,0xE1,0x11,
+                    0x00,0x00,0xCD,0x00,0x00,0xE1,0xE3,0x36,0x04,0x23,
+                    0xE3,0x2C,0x20,0xEB,0x7C,0xC6,0x08,0x67,0xFE,0x58,
+                    0x20,0xE3,0xE1,0xC9]);
+                wpokeTracked(6, zxofs[L._tiledepack], 'tiledepack');
+                wpokeTracked(10, zxofs[L._xmtree], 'xmtree');
+                wpokeTracked(13, zxofs[L._trun], 'trun');
+                depbuf[thistart + 18] = hdr.prevPred;
+            }
+        }
+
+        // --- Fragment 3: xmtree data (14 bytes) ---
+        for (let i = 0; i < 14; i++) {
+            const entryPos = zxofs[L._xmtree] + i;
+            const v = hdr.modeTree[i];
+            if (v <= 7) {
+                let targetOfs;
+                switch (v) {
+                    case 0: targetOfs = zxofs[L._xorri]; break;
+                    case 1: targetOfs = zxofs[L._xorre]; break;
+                    case 2: targetOfs = zxofs[L._xtinv]; break;
+                    case 3: targetOfs = zxofs[L._xorh2]; break;
+                    case 4: targetOfs = zxofs[L._xorv2]; break;
+                    case 5: targetOfs = zxofs[L._xorh1]; break;
+                    case 6: targetOfs = zxofs[L._xorv1]; break;
+                    case 7: targetOfs = zxofs[L._noxor]; break;
+                }
+                depbuf[depbufree++] = (targetOfs - entryPos + 0xE0) & 0xFF;
+            } else {
+                depbuf[depbufree++] = v;
+            }
+        }
+
+        // --- Fragment 4: cctwalk ---
+        appendep([0x11,0x00,0x00,0xCB,0x21,0xCC,0x00,0x00,0x30,0x01,
+            0x13,0x1A,0xD6,0xE0,0xD8,0x83,0x5F,0x30,0xF0,0x14,0x18,0xED]);
+        wpokeTracked(1, zxofs[L._cctree], 'cctree');
+        wpokeTracked(6, zxofs[L._fillbits], 'fillbits');
+
+        // --- Fragment 5: getbit ---
+        appendep([0xCB,0x21,0xC0,0xDD,0x4E,0x00,0xDD,0x23,0xCB,0x11,0xC9]);
+
+        // --- Fragment 6: xorr ---
+        if (cfg[1] < 9) { // CFREB < 9
+            if (cfg[2]) { // CFRPR
+                appendep([0x2F,0x00,0x1A,0x57,0x1E,0x1A,0x3E,0xFF,0xCD,0x00,
+                    0x00,0x38,0x18,0x06,0x00,0xCD,0x00,0x00,0x2F,0x32,
+                    0x07,0x80,0x18,0x0D]);
+                wpokeTracked(9, zxofs[L._getbit], 'getbit');
+                depbuf[thistart + 14] = cfg[1]; // CFREB
+                wpokeTracked(16, zxofs[L._getbits], 'getbits');
+                wpokeTracked(20, zxofs[L._ldrpr], 'ldrpr');
+            } else {
+                appendep([0x2F,0x00,0x1A,0x57,0x1E,0x1A,0x06,0x00,0xCD,0x00,
+                    0x00,0x2F,0x18,0x0D]);
+                depbuf[thistart + 7] = cfg[1]; // CFREB
+                wpokeTracked(9, zxofs[L._getbits], 'getbits');
+            }
+            // xorv
+            appendep([0x08,0x3E,0x00,0x08,0x00,0x1A,0x5F,0xC6,0xF0,0x9F,
+                0x57,0x3E,0xE0,0xED,0x53,0x29,0x80,0x85,0x5F,0x7C,
+                0x38,0x02,0xD6,0x08,0x47,0xC6,0x06,0x57,0xFE,0x40,
+                0x3E,0x00,0x38,0x04,0x1A,0x08,0x14,0x1A,0x50,0x06,
+                0x08,0x3E,0xFF,0xAE,0x77,0x24,0x14,0x10,0xF8,0xC9]);
+            depbuf[thistart + 2] = cfg[6]; // CFVB2 (CFINV=0)
+            wpokeTracked(15, thistart + 41, '_xorv_selfmod1');
+            depbuf[thistart + 31] = cfg[4]; // CFVB1 (CFINV=0)
+        } else { // CFREB >= 9
+            if (cfg[2]) { // CFRPR
+                appendep([0x2F,0x00,0x1A,0xCD,0x00,0x00,0x38,0x13,0x58,0x50,
+                    0x06,0x00,0xCB,0x21,0xCC,0x00,0x00,0xCB,0x13,0xCB,
+                    0x12,0x10,0xF5,0xED,0x53,0x00,0x00,0x11,0x00,0x00,
+                    0x42,0x57,0x7B,0x2F,0x1E,0x1A,0x18,0x0D]);
+                wpokeTracked(4, zxofs[L._getbit], 'getbit');
+                depbuf[thistart + 11] = cfg[1]; // CFREB
+                wpokeTracked(15, zxofs[L._fillbits], 'fillbits');
+                wpokeTracked(25, zxofs[L._ldrpr], 'ldrpr');
+            } else {
+                appendep([0x2F,0x00,0x1A,0x57,0x58,0x78,0x06,0x00,0xCB,0x21,
+                    0xCC,0x00,0x00,0x8F,0xCB,0x13,0x10,0xF6,0x43,0x2F,
+                    0x1E,0x1A,0x18,0x0D]);
+                depbuf[thistart + 7] = cfg[1]; // CFREB
+                wpokeTracked(11, zxofs[L._fillbits], 'fillbits');
+            }
+            // xorvLref
+            appendep([0x08,0x3E,0x00,0x08,0x00,0x1A,0x5F,0xC6,0xF0,0x9F,
+                0x57,0x3E,0xE0,0xED,0x53,0x29,0x80,0x85,0x5F,0x7C,
+                0x04,0x38,0x02,0xD6,0x08,0x10,0xFC,0x47,0xC6,0x06,
+                0x57,0xFE,0x40,0x3E,0x00,0x38,0x04,0x1A,0x08,0x14,
+                0x1A,0x50,0x06,0x08,0x3E,0xFF,0xAE,0x77,0x24,0x14,
+                0x10,0xF8,0xC9]);
+            depbuf[thistart + 2] = cfg[6]; // CFVB2
+            wpokeTracked(15, thistart + 44, '_xorvL_selfmod1');
+            depbuf[thistart + 34] = cfg[4]; // CFVB1
+        }
+
+        // --- Fragment 7: xorh ---
+        appendep([0x17,0x1A,0x32,0x19,0x80,0xEE,0xBD,0x32,0x23,0x80,
+            0x1E,0x08,0x7D,0xE6,0x1F,0x3E,0x00,0x28,0x03,0x2D,
+            0x7E,0x2C,0x1F,0x56,0xCB,0x1A,0x1F,0x7E,0x06,0x04,
+            0xCB,0x1A,0xAA,0xCB,0x1A,0xA7,0x10,0xF8,0x77,0x24,
+            0x1D,0x20,0xE1,0xC9]);
+        wpokeTracked(3, thistart + 25, '_xorh_selfmod1');
+        wpokeTracked(8, thistart + 35, '_xorh_selfmod2');
+        depbuf[thistart + 16] = (cfg[7] * 2 + cfg[5]); // CFHB2*2+CFHB1 (CFINV=0)
+
+        // --- Fragment 8: tileclear (conditional) ---
+        if (cfg[0] > QUARS) { // CFGRP > QUARS
+            appendep([0x11,0x00,0x7E,0xCD,0x00,0x00,0x30,0xA7]);
+            wpokeTracked(4, zxofs[L._getbit], 'getbit');
+            depbuf[thistart + 7] = (zxofs[L._xvini] - (thistart + 8)) & 0xFF;
+        }
+
+        // --- Fragment 9: quafdepack or sixtdepack ---
+        if (QUARS & cfg[0]) { // QUARS mode
+            appendep([0xCD,0x00,0x00,0xE5,0xCD,0x00,0x00,0xE1,0xCD,0x00,
+                0x00,0x9F,0xCD,0x00,0x00,0xCD,0x00,0x00,0x25,0x25,
+                0xB7,0xC4,0x00,0x00,0xCD,0x00,0x00,0x0F,0xCB,0x16,
+                0x0F,0xCB,0x16,0x24,0xC9]);
+            wpokeTracked(1, thistart + 3, '_quaf_self1');
+            wpokeTracked(5, thistart + 8, '_quaf_self2');
+            wpokeTracked(9, zxofs[L._getbit], 'getbit');
+            wpokeTracked(13, thistart + 15, '_quaf_self3');
+            wpokeTracked(16, thistart + 20, '_quaf_self4');
+            wpokeTracked(22, zxofs[L._cellcode], 'cellcode');
+            wpokeTracked(25, thistart + 27, '_quaf_self5');
+        } else { // SIXT mode
+            appendep([0xCD,0x00,0x00,0xE5,0xCD,0x00,0x00,0xE1,0xCD,0x00,
+                0x00,0xCD,0x00,0x00,0x25,0x25,0xCD,0x00,0x00,0xCD,
+                0x00,0x00,0x0F,0xCB,0x16,0x0F,0xCB,0x16,0x24,0xC9]);
+            wpokeTracked(1, thistart + 3, '_sixt_self1');
+            wpokeTracked(5, thistart + 8, '_sixt_self2');
+            wpokeTracked(9, thistart + 11, '_sixt_self3');
+            wpokeTracked(12, thistart + 16, '_sixt_self4');
+            wpokeTracked(17, zxofs[L._cellcode], 'cellcode');
+            wpokeTracked(20, thistart + 22, '_sixt_self5');
+        }
+
+        // --- Fragment 10: attr tree header (conditional) ---
+        if (cfg[11] > 1) { // CFDIFA > 1
+            if (cfg[15] > 1) depbuf[depbufree++] = 1; // CFARLEB > 1
+            if (cfg[13] > 1) { // CFAREM > 1
+                depbuf[depbufree] = (zxofs[L._adreps] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree++] = 0xE1;
+                depbuf[depbufree++] = 0xE2;
+                depbuf[depbufree++] = 0xE3;
+                depbuf[depbufree] = (zxofs[L._adnorh] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree] = (zxofs[L._adnorv] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree] = (zxofs[L._adskil] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree] = (zxofs[L._adskir] - depbufree + 0xE0) & 0xFF; depbufree++;
+            } else {
+                depbuf[depbufree] = (zxofs[L._adreps] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree++] = 0xE1;
+                depbuf[depbufree] = (zxofs[L._adnorh] - depbufree + 0xE0) & 0xFF; depbufree++;
+                depbuf[depbufree] = (zxofs[L._adnorv] - depbufree + 0xE0) & 0xFF; depbufree++;
+            }
+        }
+
+        // --- Fragment 11: cctree data ---
+        appendep([0x00,0xE1,0xE2,0xE7,0xE2,0xE3,0x08,0x04,0x02,0x01,
+            0xE2,0xE7,0xE2,0xE3,0x09,0x0C,0x06,0x03,0xE2,0xE3,
+            0x05,0x0A,0x0F,0xE1,0xE2,0xE3,0x07,0x0B,0x0D,0x0E]);
+
+        // --- Fragment 12: adepack (conditional) ---
+        if (cfg[11] > 1) { // CFDIFA > 1
+            if (cfg[15] > 1) { // CFARLEB > 1
+                appendep([0x11,0xFF,0xFF,0x1A,0x3D,0x20,0x00,0x13]);
+                wpokeTracked(1, zxofs[L._attrle], 'attrle');
+                depbuf[thistart + 6] = (zxofs[L._adsaverle] - (thistart + 7)) & 0xFF;
+            } else {
+                appendep([0x11,0x00,0x00]);
+                wpokeTracked(1, zxofs[L._attree], 'attree');
+            }
+        }
+
+        // --- Fragment 13: trun ---
+        if (cfg[1] > 8) { // CFREB > 8
+            appendep([0xCD,0x00,0x00,0x83,0x5F,0x30,0x01,0x14,0xD5,0xAF,0x47,0xC9]);
+        } else if ((cfg[11] > 1) && (cfg[13] > 1)) { // CFDIFA>1 && CFAREM>1
+            appendep([0xCD,0x00,0x00,0x83,0x5F,0x30,0x01,0x14,0xD5,0x93,0xC9]);
+        } else {
+            appendep([0xCD,0x00,0x00,0x83,0x5F,0x30,0x01,0x14,0xD5,0xC9]);
+        }
+        wpokeTracked(1, zxofs[L._twalk], 'twalk');
+
+        // --- Fragment 14: adreps + adrepl (conditional) ---
+        if (cfg[11] > 1) { // CFDIFA > 1
+            if (cfg[13] > 1) { // CFAREM > 1
+                if (cfg[15] > 1) { // CFARLEB > 1
+                    appendep([0x06,0x00,0xCD,0x00,0x00,0x3C,0x32,0xFF,0xFF]);
+                    depbuf[thistart + 1] = cfg[15]; // CFARLEB
+                    wpokeTracked(3, zxofs[L._getbits], 'getbits');
+                    wpokeTracked(7, zxofs[L._attrle], 'attrle');
+                    depbuf[depbufree++] = 0xAF; // xor a
+                }
+                appendep([0x86,0xFA,0x00,0x00,0x20,0x00]);
+                wpokeTracked(2, zxofs[L._adresr], 'adresr');
+                depbuf[thistart + 5] = (zxofs[L._adresl] - (thistart + 6)) & 0xFF;
+            }
+
+            if (cfg[14] > 0) { // CFAREB > 0
+                if (1 & cfg[13]) { // CFAREM odd
+                    if (cfg[11] <= (1 << cfg[14])) {
+                        appendep([0x06,0x00,0xCD,0x00,0x00,0x5F,0x50,0x21,0x00,0x00,
+                            0x19,0x7E,0xC9]);
+                        depbuf[thistart + 1] = cfg[14]; // CFAREB
+                        wpokeTracked(3, zxofs[L._getbits], 'getbits');
+                        wpokeTracked(8, zxofs[L._altab], 'altab');
+                    } else {
+                        appendep([0x06,0x00,0xCD,0x00,0x00,0x5F,0x50,0x21,0x00,0x00,
+                            0x20,0xFE,0x06,0x07]);
+                        depbuf[thistart + 1] = cfg[14]; // CFAREB
+                        wpokeTracked(3, zxofs[L._getbits], 'getbits');
+                        wpokeTracked(8, zxofs[L._altab] - 1, 'altab-1');
+                        depbuf[thistart + 11] = (zxofs[L._altabl] - (thistart + 12)) & 0xFF;
+                        depbuf[thistart + 13] = 7 + cfg[12]; // CFFLASH
+                    }
+                } else {
+                    appendep([0x06,0x00,0xCD,0x00,0x00,0x5F,0x50,0x21,0x00,0x00,
+                        0xCB,0x47,0x20,0xFE,0x06,0x07,0xFE]);
+                    depbuf[thistart + 1] = cfg[14] + 1; // CFAREB+1
+                    wpokeTracked(3, zxofs[L._getbits], 'getbits');
+                    wpokeTracked(8, zxofs[L._altab] - (1 << cfg[14]), 'altab_base');
+                    depbuf[thistart + 11] = 0x47 | (cfg[14] * 8); // bit CFAREB,a
+                    depbuf[thistart + 13] = (zxofs[L._altabl] - (thistart + 14)) & 0xFF;
+                    depbuf[thistart + 15] = 7 + cfg[12] - cfg[14]; // CFFLASH-CFAREB
+                }
+            } else {
+                depbuf[depbufree++] = 0x06; // ld b,N
+                depbuf[depbufree++] = 7 + cfg[12]; // CFFLASH+7
+            }
+        }
+
+        // --- Fragment 15: getbits ---
+        appendep([0xAF,0xCB,0x21,0xCC,0x00,0x00,0x8F,0x10,0xF8,0xC9]);
+        wpokeTracked(4, zxofs[L._fillbits], 'fillbits');
+
+        // --- Fragment 16: adnor (conditional) ---
+        if (cfg[11] > 1) { // CFDIFA > 1
+            if (cfg[13] > 1) { // CFAREM > 1
+                appendep([0x3C,0x35,0x3C,0x35,0x28,0xFE,0x77,0x3D,0x2B,0x7E,
+                    0xC0,0x2B,0xBE,0x18,0xFA]);
+                depbuf[thistart + 5] = (zxofs[L._adrepl] - (thistart + 6)) & 0xFF;
+                appendep([0x3D,0x34,0x3D,0x34,0x28,0xFE,0x77,0x3C,0x11,0xE0,
+                    0xFF,0x19,0x7E,0xC0,0x23,0xBE,0x18,0xFA]);
+                depbuf[thistart + 5] = (zxofs[L._adrepl] - (thistart + 6)) & 0xFF;
+            } else {
+                if (cfg[15] > 1) { // CFARLEB > 1
+                    appendep([0x06,0x00,0xCD,0x00,0x00,0x3C,0x32,0xFF,0xFF]);
+                    depbuf[thistart + 1] = cfg[15]; // CFARLEB
+                    wpokeTracked(3, zxofs[L._getbits], 'getbits');
+                    wpokeTracked(7, zxofs[L._attrle], 'attrle');
+                }
+                appendep([0x34,0x28,0x0B]);
+                depbuf[thistart + 2] = (zxofs[L._adrepv] - (thistart + 3)) & 0xFF;
+
+                appendep([0x35,0x28,0xFE,0x36,0x01,0x2B,0x7E,0xC9]);
+                depbuf[thistart + 2] = (zxofs[L._adrepl] - (thistart + 3)) & 0xFF;
+
+                appendep([0x34,0x28,0xFE,0x11,0xE0,0xFF,0x72,0x19,0x7E,0xC9]);
+                depbuf[thistart + 2] = (zxofs[L._adrepl] - (thistart + 3)) & 0xFF;
+            }
+
+            // altab palette data
+            for (let i = 0; i < arefs; i++) depbuf[depbufree++] = hdr.attrPalette[i];
+        }
+
+        // --- Now emit ASM from the built depbuf ---
+        // Collect all label positions (depacker-relative offset -> label name)
+        const labels = {};
+        function addLabel(ofs, name) { if (ofs >= 0 && !(ofs in labels)) labels[ofs] = name; }
+
+        addLabel(zxofs[L._xmtree], 'xmtree');
+        addLabel(zxofs[L._cellcode], 'cellcode');
+        addLabel(zxofs[L._twalk], 'twalk');
+        addLabel(zxofs[L._getbit], 'getbit');
+        addLabel(zxofs[L._fillbits], 'fillbits');
+        addLabel(zxofs[L._xorri], 'xorri');
+        addLabel(zxofs[L._xorre], 'xorre');
+        if (zxofs[L._ldrpr] >= 0) addLabel(zxofs[L._ldrpr], 'ldrpr');
+        addLabel(zxofs[L._xorv2], 'xorv2');
+        addLabel(zxofs[L._xtinv], 'xtinv');
+        addLabel(zxofs[L._xorv1], 'xorv1');
+        addLabel(zxofs[L._xvini], 'xvini');
+        addLabel(zxofs[L._noxor], 'noxor');
+        addLabel(zxofs[L._xorh1], 'xorh1');
+        addLabel(zxofs[L._xorh2], 'xorh2');
+        addLabel(zxofs[L._tiledepack], 'tiledepack');
+        addLabel(zxofs[L._cctree], 'cctree');
+        if (zxofs[L._attrle] >= 0) addLabel(zxofs[L._attrle], 'attrle');
+        if (zxofs[L._attree] >= 0) addLabel(zxofs[L._attree], 'attree');
+        if (zxofs[L._adepack] >= 0) addLabel(zxofs[L._adepack], 'adepack');
+        addLabel(zxofs[L._trun], 'trun');
+        if (zxofs[L._adreps] >= 0) addLabel(zxofs[L._adreps], 'adreps');
+        if (zxofs[L._adsaverle] >= 0) addLabel(zxofs[L._adsaverle], 'adsaverle');
+        if (zxofs[L._adrepl] >= 0) addLabel(zxofs[L._adrepl], 'adrepl');
+        addLabel(zxofs[L._getbits], 'getbits');
+        if (zxofs[L._adnorh] >= 0) addLabel(zxofs[L._adnorh], 'adnorh');
+        if (zxofs[L._adnorv] >= 0) addLabel(zxofs[L._adnorv], 'adnorv');
+        if (zxofs[L._adskil] >= 0) addLabel(zxofs[L._adskil], 'adskil');
+        if (zxofs[L._adskir] >= 0) addLabel(zxofs[L._adskir], 'adskir');
+        if (zxofs[L._adresl] >= 0) addLabel(zxofs[L._adresl], 'adresl');
+        if (zxofs[L._adresr] >= 0) addLabel(zxofs[L._adresr], 'adresr');
+        if (zxofs[L._altabl] >= 0) addLabel(zxofs[L._altabl], 'altabl');
+        if (zxofs[L._altab] >= 0) addLabel(zxofs[L._altab], 'altab');
+        if (zxofs[L._adrepv] >= 0) addLabel(zxofs[L._adrepv], 'adrepv');
+
+        // Build a set of patch positions (absPos -> patch info)
+        const patchMap = {};
+        for (const p of patches) {
+            patchMap[p.absPos] = p;
+        }
+
+        // Emit ASM header
+        let asm = '';
+        asm += '; ' + compName + ' depacker test for ZX Spectrum\n';
+        asm += '; Unpack compressed data to screen ($4000, 6912 bytes)\n';
+        asm += '; Dynamic depacker generated from LgK compressed file header\n';
+        asm += '; Generated by Compression Compare\n\n';
+        asm += '    device ZXSPECTRUM48\n\n';
+        asm += '    org $8000\n\n';
+        asm += 'start:\n';
+
+        // Emit depacker bytes as db lines with labels
+        const totalBytes = depbufree;
+        let i = 0;
+        while (i < totalBytes) {
+            // Emit any labels at this position
+            if (labels[i]) {
+                asm += labels[i] + ':\n';
+            }
+
+            // Check if there's a 2-byte address patch here
+            if (patchMap[i]) {
+                const p = patchMap[i];
+                // Emit the opcode byte before the address (call/ld instructions)
+                // Actually patches are at the address bytes, so the opcode is at i-1 or already emitted.
+                // Since patches track absPos = position of the low byte of the address,
+                // we need to check: the previous byte might be a call (0xCD), ld de (0x11), etc.
+                // The wpoke writes at thistart+ofs which is the address position.
+                // So we should emit up to i as db, then emit dw for i,i+1.
+                // But we need the opcode byte before. Actually in our emission, we're going
+                // byte by byte. The patch is at position i (and i+1). We just emit dw.
+                // But we need to handle the case where i has a label too (already emitted above).
+                // Let me just emit the patch target's label name using dw.
+
+                // Determine what sjasmplus expression to use
+                let expr;
+                if (p.label === 'packed_data') {
+                    expr = 'packed_data';
+                } else if (p.label.startsWith('altab-')) {
+                    expr = 'altab-1';
+                } else if (p.label === 'altab_base') {
+                    expr = 'altab-' + (1 << cfg[14]);
+                } else if (p.label.startsWith('_')) {
+                    // Self-modifying code reference (points within depacker)
+                    // Use $ + offset expression
+                    const targetPos = p.target;
+                    expr = 'depacker+' + targetPos;
+                } else {
+                    expr = p.label;
+                }
+                asm += '    dw ' + expr + '\n';
+                i += 2;
+                continue;
+            }
+
+            // Emit a line of db (up to 16 bytes, stopping at labels or patches)
+            const lineStart = i;
+            const lineBytes = [];
+            while (i < totalBytes && lineBytes.length < 16) {
+                if (i > lineStart && labels[i]) break; // label at this position
+                if (patchMap[i]) break; // patch at this position
+                lineBytes.push(hex(depbuf[i]));
+                i++;
+            }
+            if (lineBytes.length > 0) {
+                asm += '    db ' + lineBytes.join(',') + '\n';
+            }
+        }
+
+        // Add call to depacker + border stripe loop before depacker code
+        asm = asm.replace('start:\n', 'start:\n    call depacker\nloop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\ndepacker:\n');
+
+        asm += '\n';
+
+        // Emit compressed data (header stripped)
+        const dataOffset = hdr.headerBytes;
+        const asmData = compressedData.subarray(dataOffset);
+        asm += '; --- Compressed data (' + asmData.length + ' bytes) ---\n';
+        asm += 'packed_data:\n';
+        asm += formatBytes(asmData) + '\n';
+
+        asm += '\n';
+        asm += '    savesna "' + id + '_screen.sna", start\n';
+
+        return asm;
+    }
+
+    asmInfo.lgk = { generator: generateLgkAsm };
+    asmInfo.lgkopt = { generator: generateLgkAsm };
+
+    // ---- RCS "smart" integrated depackers (un-reorder while decompressing) ----
+    // Source: Einar Saukas, https://github.com/einar-saukas/RCS (z80/ folder)
+    const RCS_DEPACKERS = {
+        rcszx0: { label: 'dzx0_smartrcs', back: false, src:
+`; "Smart" integrated RCS+ZX0 decoder by Einar Saukas (112 bytes)
+; HL: source address, DE: destination address (screen at $4000)
+dzx0_smartrcs:
+        ld      bc, $ffff               ; preserve default offset 1
+        push    bc
+        inc     bc
+        ld      a, $80
+dzx0r_literals:
+        call    dzx0r_elias             ; obtain length
+dzx0r_literals_loop:
+        call    dzx0r_copy_byte         ; copy literals
+        jp      pe, dzx0r_literals_loop
+        add     a, a                    ; copy from last offset or new offset?
+        jr      c, dzx0r_new_offset
+        call    dzx0r_elias             ; obtain length
+dzx0r_copy:
+        ex      (sp), hl                ; preserve source, restore offset
+        push    hl                      ; preserve offset
+        add     hl, de                  ; calculate destination - offset
+dzx0r_copy_loop:
+        push    hl                      ; copy from offset
+        ex      de, hl
+        call    dzx0r_convert
+        ex      de, hl
+        call    dzx0r_copy_byte
+        pop     hl
+        inc     hl
+        jp      pe, dzx0r_copy_loop
+        pop     hl                      ; restore offset
+        ex      (sp), hl                ; preserve offset, restore source
+        add     a, a                    ; copy from literals or new offset?
+        jr      nc, dzx0r_literals
+dzx0r_new_offset:
+        pop     bc                      ; discard last offset
+        ld      c, $fe                  ; prepare negative offset
+        call    dzx0r_elias_loop        ; obtain offset MSB
+        inc     c
+        ret     z                       ; check end marker
+        ld      b, c
+        ld      c, (hl)                 ; obtain offset LSB
+        inc     hl
+        rr      b                       ; last offset bit becomes first length bit
+        rr      c
+        push    bc                      ; preserve new offset
+        ld      bc, 1                   ; obtain length
+        call    nc, dzx0r_elias_backtrack
+        inc     bc
+        jr      dzx0r_copy
+dzx0r_elias:
+        inc     c                       ; interlaced Elias gamma coding
+dzx0r_elias_loop:
+        add     a, a
+        jr      nz, dzx0r_elias_skip
+        ld      a, (hl)                 ; load another group of 8 bits
+        inc     hl
+        rla
+dzx0r_elias_skip:
+        ret     c
+dzx0r_elias_backtrack:
+        add     a, a
+        rl      c
+        rl      b
+        jr      dzx0r_elias_loop
+dzx0r_copy_byte:
+        push    de                      ; preserve destination
+        call    dzx0r_convert           ; convert destination
+        ldi                             ; copy byte
+        pop     de                      ; restore destination
+        inc     de                      ; update destination
+        ret
+; Convert RCS address 010RRccc ccrrrppp to screen address 010RRppp rrrccccc
+dzx0r_convert:
+        ex      af, af'
+        ld      a, d                    ; A = 010RRccc
+        cp      $58
+        jr      nc, dzx0r_skip
+        xor     e
+        and     $f8
+        xor     e                       ; A = 010RRppp
+        push    af
+        xor     d
+        xor     e                       ; A = ccrrrccc
+        rlca
+        rlca                            ; A = rrrccccc
+        pop     de                      ; D = 010RRppp
+        ld      e, a                    ; E = rrrccccc
+dzx0r_skip:
+        ex      af, af'
+        ret
+` },
+        rcszx0b: { label: 'dzx0_smartrcs_back', back: true, src:
+`; "Smart" integrated RCS+ZX0 decoder by Einar Saukas (113 bytes) - BACKWARDS
+; HL: last source address, DE: last destination address ($5AFF)
+dzx0_smartrcs_back:
+        ld      bc, 1                   ; preserve default offset 1
+        push    bc
+        ld      a, $80
+dzx0rb_literals:
+        call    dzx0rb_elias            ; obtain length
+dzx0rb_literals_loop:
+        call    dzx0rb_copy_byte        ; copy literals
+        jp      pe, dzx0rb_literals_loop
+        inc     c
+        add     a, a                    ; copy from last offset or new offset?
+        jr      c, dzx0rb_new_offset
+        call    dzx0rb_elias            ; obtain length
+dzx0rb_copy:
+        ex      (sp), hl                ; preserve source, restore offset
+        push    hl                      ; preserve offset
+        add     hl, de                  ; calculate destination - offset
+dzx0rb_copy_loop:
+        push    hl                      ; copy from offset
+        ex      de, hl
+        call    dzx0rb_convert
+        ex      de, hl
+        call    dzx0rb_copy_byte
+        pop     hl
+        dec     hl
+        jp      pe, dzx0rb_copy_loop
+        inc     c
+        pop     hl                      ; restore offset
+        ex      (sp), hl                ; preserve offset, restore source
+        add     a, a                    ; copy from literals or new offset?
+        jr      nc, dzx0rb_literals
+dzx0rb_new_offset:
+        inc     sp                      ; discard last offset
+        inc     sp
+        call    dzx0rb_elias            ; obtain offset MSB
+        dec     b
+        ret     z                       ; check end marker
+        dec     c                       ; adjust for positive offset
+        ld      b, c
+        ld      c, (hl)                 ; obtain offset LSB
+        dec     hl
+        srl     b                       ; last offset bit becomes first length bit
+        rr      c
+        inc     bc
+        push    bc                      ; preserve new offset
+        ld      bc, 1                   ; obtain length
+        call    c, dzx0rb_elias_backtrack
+        inc     bc
+        jr      dzx0rb_copy
+dzx0rb_elias_backtrack:
+        add     a, a
+        rl      c
+        rl      b
+dzx0rb_elias:
+        add     a, a                    ; inverted interlaced Elias gamma coding
+        jr      nz, dzx0rb_elias_skip
+        ld      a, (hl)                 ; load another group of 8 bits
+        dec     hl
+        rla
+dzx0rb_elias_skip:
+        jr      c, dzx0rb_elias_backtrack
+        ret
+dzx0rb_copy_byte:
+        push    de                      ; preserve destination
+        call    dzx0rb_convert          ; convert destination
+        ldd                             ; copy byte
+        pop     de                      ; restore destination
+        dec     de                      ; update destination
+        ret
+; Convert RCS address 010RRccc ccrrrppp to screen address 010RRppp rrrccccc
+dzx0rb_convert:
+        ex      af, af'
+        ld      a, d                    ; A = 010RRccc
+        cp      $58
+        jr      nc, dzx0rb_skip
+        xor     e
+        and     $f8
+        xor     e                       ; A = 010RRppp
+        push    af
+        xor     d
+        xor     e                       ; A = ccrrrccc
+        rlca
+        rlca                            ; A = rrrccccc
+        pop     de                      ; D = 010RRppp
+        ld      e, a                    ; E = rrrccccc
+dzx0rb_skip:
+        ex      af, af'
+        ret
+` },
+        rcszx7: { label: 'dzx7_smartrcs', back: false, src:
+`; "Smart" integrated RCS+ZX7 decoder by Einar Saukas (110 bytes)
+; HL: source address, DE: destination address (screen at $4000)
+dzx7_smartrcs:
+        ld      a, $80
+dzx7r_copy_byte_loop:
+        call    dzx7r_copy_byte         ; copy literal byte
+dzx7r_main_loop:
+        call    dzx7r_next_bit
+        jr      nc, dzx7r_copy_byte_loop ; literal or sequence?
+        push    de
+        ld      bc, 0
+        ld      d, b
+dzx7r_len_size_loop:
+        inc     d
+        call    dzx7r_next_bit
+        jr      nc, dzx7r_len_size_loop
+dzx7r_len_value_loop:
+        call    nc, dzx7r_next_bit
+        rl      c
+        rl      b
+        jr      c, dzx7r_exit           ; check end marker
+        dec     d
+        jr      nz, dzx7r_len_value_loop
+        inc     bc                      ; adjust length
+        ld      e, (hl)                 ; offset flag (1 bit) + value (7 bits)
+        inc     hl
+        defb    $cb, $33                ; "SLL E" aka "SLS E"
+        jr      nc, dzx7r_offset_end    ; if flag set, load 4 extra bits
+        ld      d, $10
+dzx7r_rld_next_bit:
+        call    dzx7r_next_bit
+        rl      d
+        jr      nc, dzx7r_rld_next_bit
+        inc     d
+        srl     d
+dzx7r_offset_end:
+        rr      e
+        ex      (sp), hl                ; store source, restore destination
+        push    hl                      ; store destination
+        sbc     hl, de                  ; HL = destination - offset - 1
+        pop     de
+dzx7r_copy_bytes:
+        push    hl
+        ex      de, hl
+        call    dzx7r_convert
+        ex      de, hl
+        call    dzx7r_copy_byte
+        pop     hl
+        inc     hl
+        jp      pe, dzx7r_copy_bytes
+        pop     hl                      ; restore source address
+        jr      dzx7r_main_loop
+dzx7r_next_bit:
+        add     a, a
+        ret     nz
+        ld      a, (hl)
+        inc     hl
+        rla
+        ret
+dzx7r_copy_byte:
+        push    de
+        call    dzx7r_convert
+        ldi
+dzx7r_exit:
+        pop     de
+        inc     de
+        ret
+; Convert RCS address 010RRccc ccrrrppp to screen address 010RRppp rrrccccc
+dzx7r_convert:
+        ex      af, af'
+        ld      a, d                    ; A = 010RRccc
+        cp      $58
+        jr      nc, dzx7r_skip
+        xor     e
+        and     $f8
+        xor     e                       ; A = 010RRppp
+        push    af
+        xor     d
+        xor     e                       ; A = ccrrrccc
+        rlca
+        rlca                            ; A = rrrccccc
+        pop     de                      ; D = 010RRppp
+        ld      e, a                    ; E = rrrccccc
+dzx7r_skip:
+        ex      af, af'
+        ret
+` },
+        rcszx7b: { label: 'dzx7_smartrcs_back', back: true, src:
+`; "Smart" integrated RCS+ZX7 decoder by Einar Saukas (110 bytes) - BACKWARDS
+; HL: last source address, DE: last destination address ($5AFF)
+dzx7_smartrcs_back:
+        ld      a, $80
+dzx7r_copy_byte_loop_b:
+        call    dzx7r_copy_byte_b       ; copy literal byte
+dzx7r_main_loop_b:
+        call    dzx7r_next_bit_b
+        jr      nc, dzx7r_copy_byte_loop_b ; literal or sequence?
+        push    de
+        ld      bc, 0
+        ld      d, b
+dzx7r_len_size_loop_b:
+        inc     d
+        call    dzx7r_next_bit_b
+        jr      nc, dzx7r_len_size_loop_b
+dzx7r_len_value_loop_b:
+        call    nc, dzx7r_next_bit_b
+        rl      c
+        rl      b
+        jr      c, dzx7r_exit_b         ; check end marker
+        dec     d
+        jr      nz, dzx7r_len_value_loop_b
+        inc     bc                      ; adjust length
+        ld      e, (hl)                 ; offset flag (1 bit) + value (7 bits)
+        dec     hl
+        defb    $cb, $33                ; "SLL E" aka "SLS E"
+        jr      nc, dzx7r_offset_end_b  ; if flag set, load 4 extra bits
+        ld      d, $10
+dzx7r_rld_next_bit_b:
+        call    dzx7r_next_bit_b
+        rl      d
+        jr      nc, dzx7r_rld_next_bit_b
+        inc     d
+        srl     d
+dzx7r_offset_end_b:
+        rr      e
+        ex      (sp), hl                ; store source, restore destination
+        push    hl                      ; store destination
+        adc     hl, de                  ; HL = destination + offset + 1
+        pop     de
+dzx7r_copy_bytes_b:
+        push    hl
+        ex      de, hl
+        call    dzx7r_convert_b
+        ex      de, hl
+        call    dzx7r_copy_byte_b
+        pop     hl
+        dec     hl
+        jp      pe, dzx7r_copy_bytes_b
+        pop     hl                      ; restore source address
+        jr      dzx7r_main_loop_b
+dzx7r_next_bit_b:
+        add     a, a
+        ret     nz
+        ld      a, (hl)
+        dec     hl
+        rla
+        ret
+dzx7r_copy_byte_b:
+        push    de
+        call    dzx7r_convert_b
+        ldd
+dzx7r_exit_b:
+        pop     de
+        dec     de
+        ret
+; Convert RCS address 010RRccc ccrrrppp to screen address 010RRppp rrrccccc
+dzx7r_convert_b:
+        ex      af, af'
+        ld      a, d                    ; A = 010RRccc
+        cp      $58
+        jr      nc, dzx7r_skip_b
+        xor     e
+        and     $f8
+        xor     e                       ; A = 010RRppp
+        push    af
+        xor     d
+        xor     e                       ; A = ccrrrccc
+        rlca
+        rlca                            ; A = rrrccccc
+        pop     de                      ; D = 010RRppp
+        ld      e, a                    ; E = rrrccccc
+dzx7r_skip_b:
+        ex      af, af'
+        ret
+` },
+    };
+
+    function generateRcsAsm(data, id) {
+        const info = RCS_DEPACKERS[id];
+        const compName = (getActiveCompressors().find(x => x.id === id) || {}).name || id;
+        let asm = '';
+        asm += '; ' + compName + ' depacker test for ZX Spectrum\n';
+        asm += '; Unpacks an RCS-reordered screen directly to $4000 (6912 bytes).\n';
+        asm += '; The "smart" depacker auto-detects the screen and un-reorders on the fly.\n';
+        asm += '; Depacker by Einar Saukas: https://github.com/einar-saukas/RCS\n';
+        asm += '; Generated by Compression Compare\n';
+        asm += '; @main\n';            // ZX-M8XXX: assemble this file
+        asm += '; @entry start\n\n';   // ZX-M8XXX: run from start
+        asm += '    device ZXSPECTRUM48\n\n';
+        asm += '    org $8000\n\n';
+        asm += 'start:\n';
+        if (info.back) {
+            asm += '    ld hl,packed_data_end-1\n';
+            asm += '    ld de,$5AFF\n';
+        } else {
+            asm += '    ld hl,packed_data\n';
+            asm += '    ld de,$4000\n';
+        }
+        asm += '    call ' + info.label + '\n';
+        asm += 'loop:\n    ld a,r\n    and 7\n    out ($fe),a\n    jr loop\n\n';
+        asm += '; --- Depacker routine ---\n';
+        asm += info.src + '\n';
+        asm += '; --- Compressed data (' + data.length + ' bytes) ---\n';
+        asm += 'packed_data:\n';
+        asm += formatBytes(data) + '\n';
+        if (info.back) asm += 'packed_data_end:\n';
+        asm += '\n    savesna "' + id + '_screen.sna", start\n';
+        return asm;
+    }
+
+    asmInfo.rcszx0  = { generator: generateRcsAsm };
+    asmInfo.rcszx0b = { generator: generateRcsAsm };
+    asmInfo.rcszx7  = { generator: generateRcsAsm };
+    asmInfo.rcszx7b = { generator: generateRcsAsm };
+
+    // ---- ASM download helpers ----
+    function formatBytes(data) {
+        const lines = [];
+        for (let i = 0; i < data.length; i += 16) {
+            const chunk = [];
+            for (let j = i; j < Math.min(i + 16, data.length); j++) {
+                chunk.push('$' + data[j].toString(16).toUpperCase().padStart(2, '0'));
+            }
+            lines.push('    db ' + chunk.join(','));
+        }
+        return lines.join('\n');
+    }
+
+    // Build the depacker-test .asm string for compressor `id` over the given
+    // compressed bytes. Factored out of downloadAsm so it can be reused headlessly
+    // (see tests/depacker-roundtrip.html). Returns null if `id` has no depacker.
+    function buildAsmString(id, compressedData) {
+        const info = asmInfo[id];
+        if (!info || !compressedData) return null;
+
+        if (info.generator) {
+            return info.generator(compressedData, id);
+        }
+
+        const isBackward = id === 'zx7b' || id === 'zx0b' || id === 'exob';
+        const compName = (getActiveCompressors().find(x => x.id === id) || {}).name || id;
+
+        let asm = '';
+        asm += '; ' + compName + ' depacker test for ZX Spectrum\n';
+        asm += '; Unpack compressed data to screen ($4000, 6912 bytes)\n';
+        asm += '; Depacker sources: https://github.com/uniabis/z80depacker\n';
+        asm += '; Generated by Compression Compare\n\n';
+        asm += '    device ZXSPECTRUM48\n\n';
+        asm += '    org $8000\n\n';
+        asm += 'start:\n';
+        asm += info.setup;
+        asm += '\n';
+        asm += '; --- Depacker routine ---\n';
+        asm += info.depacker;
+        asm += '\n';
+        const dataOff = info.dataOffset || 0;
+        const asmData = dataOff ? compressedData.subarray(dataOff) : compressedData;
+        asm += '; --- Compressed data (' + asmData.length + ' bytes) ---\n';
+        asm += 'packed_data:\n';
+        asm += formatBytes(asmData) + '\n';
+        if (isBackward) {
+            asm += 'packed_data_end:\n';
+        }
+        asm += '\n';
+        asm += '    savesna "' + id + '_screen.sna", start\n';
+        return asm;
+    }
+
+    // Test hook: pack `screenData` with compressor `id`, returning the compressed
+    // bytes and its depacker .asm. Used by the headless depacker-roundtrip harness.
+    window.__packAndAsm = function(id, screenData, level) {
+        const c = getActiveCompressors().find(x => x.id === id);
+        if (!c || !c.compress) return { error: 'no compressor ' + id };
+        // Coerce into THIS realm's Uint8Array (caller may be a different window/iframe,
+        // where `screenData instanceof Uint8Array` is false and strict packers reject it).
+        const data = new Uint8Array(screenData);
+        let compressed;
+        try { compressed = new Uint8Array(c.compress(data, level)); }
+        catch (e) { return { error: 'compress: ' + (e && e.message || e) }; }
+        return { compressed: compressed, asm: buildAsmString(id, compressed),
+                 attrsModified: !!c.attrsModified };
+    };
+    window.__asmInfoKeys = function() { return Object.keys(asmInfo); };
+
+    function downloadAsm(id) {
+        const r = results.find(x => x.id === id);
+        if (!r || !r.compressedData) return;
+        const asm = buildAsmString(id, r.compressedData);
+        if (!asm) return;
+
+        const blob = new Blob([asm], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = id + '_screen.asm';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ---- Sorting ----
+    document.querySelector('thead').addEventListener('click', function(e) {
+        const th = e.target.closest('th');
+        if (!th) return;
+        const col = th.dataset.col;
+        if (!col) return;
+        if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+        document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted-asc', 'sorted-desc'));
+        th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+        renderTable();
+    });
+
+    renderTable();
+    </script>
+</body>
+</html>

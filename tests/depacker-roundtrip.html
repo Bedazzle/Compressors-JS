@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Depacker Roundtrip Test</title>
+<style>
+  body { font-family: ui-monospace, monospace; background:#111; color:#ddd; padding:1rem; }
+  pre { white-space: pre-wrap; }
+  .ok { color:#4ade80; } .bad { color:#f87171; } .warn { color:#fbbf24; }
+</style>
+</head>
+<body>
+<h1>Z80 depacker &times; JS packer roundtrip</h1>
+<p>Packs each test screen with every Compressors-JS packer, assembles the matching
+Z80 depacker (ZX-M8XXX sjasmplus-js), runs it on the ZX-M8XXX Z80 core, and compares
+the decompressed <code>$4000&ndash;$5AFF</code> against the original screen.</p>
+<pre id="summary">Running&hellip;</pre>
+<pre id="out"></pre>
+
+<!-- Reuse all packers + depacker-ASM generation from the comparison tool (same repo). -->
+<iframe id="cc" src="../compressors_compare.html" style="display:none"></iframe>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// Config — everything is resolved at runtime, nothing machine-specific.
+//   ?m8xxx=<url>    base URL of a ZX-M8XXX checkout (default: ../../ZX-M8XXX,
+//                   i.e. cloned as a sibling of this repo). Provides the Z80 CPU
+//                   core and the sjasmplus-js assembler.
+//   ?screens=<json> [[name,url],...] list of screens (default: ./fixtures via
+//                   fixtures/manifest.json).
+//   ?level=N        compression level (default 5).
+// ---------------------------------------------------------------------------
+const params  = new URLSearchParams(location.search);
+const M8_BASE  = new URL((params.get('m8xxx') || '../../ZX-M8XXX') + '/', location.href).href;
+const LEVEL    = parseInt(params.get('level') || '5', 10);
+const SCREEN_BYTES = 6912;
+// Generous ceiling: slow range/arith coders (shrinkler) reach HALT only after
+// millions of instructions. Hitting this is reported 'timeout', never 'mismatch',
+// so a too-small budget can't masquerade as a depacker bug.
+const BUDGET   = 300_000_000;
+
+const out = document.getElementById('out');
+const summary = document.getElementById('summary');
+
+function fail(msg) { out.textContent = 'RESULT_START\n' + JSON.stringify({ error: msg }) + '\nRESULT_END'; summary.textContent = 'ERROR: ' + msg; }
+
+// ---------------------------------------------------------------------------
+function flatMem() {
+  const ram = new Uint8Array(65536);
+  return { ram, read: a => ram[a & 0xffff], write: (a, v) => { ram[a & 0xffff] = v & 0xff; } };
+}
+
+// Strip host-only directives, turn the post-decompress border-stripe loop into a
+// single HALT so completion is detectable deterministically.
+function prepAsm(asm) {
+  let s = asm.replace(/^[ \t]*device\b.*$/gim, '');
+  s = s.replace(/^[ \t]*savesna\b.*$/gim, '');
+  s = s.replace(/loop:\s*\n\s*ld\s+a,\s*r\s*\n\s*and\s+7\s*\n\s*out\s*\(\$fe\),\s*a\s*\n\s*jr\s+loop/i, '    halt');
+  return s;
+}
+
+async function loadScreen(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+function runOne(Assembler, Z80, cc, id, screen) {
+  const res = cc.__packAndAsm(id, screen, LEVEL);
+  if (!res || res.error) return { id, status: 'pack-error', detail: res ? res.error : 'null' };
+  if (!res.asm) return { id, status: 'no-asm', packed: res.compressed.length };
+
+  let asm;
+  try { asm = Assembler.assemble(prepAsm(res.asm)); }
+  catch (e) { return { id, status: 'assemble-throw', detail: String(e && e.message || e), packed: res.compressed.length }; }
+  if (!asm.success) {
+    const errs = (asm.errors || []).map(x => x.message || x.text || String(x)).join(' | ');
+    return { id, status: 'assemble-fail', detail: errs.slice(0, 200), packed: res.compressed.length };
+  }
+
+  const mem = flatMem();
+  for (let i = 0; i < asm.output.length; i++) mem.ram[(asm.outputStart + i) & 0xffff] = asm.output[i] & 0xff;
+
+  const startSym = (asm.symbols || []).find(s => s.name === 'start');
+  const cpu = new Z80(mem);
+  cpu.reset();
+  cpu.pc = startSym ? startSym.value : asm.outputStart;
+  cpu.sp = 0x7ff0;                 // safe stack: below code ($8000), above screen
+  let steps = 0;
+  while (!cpu.halted && steps < BUDGET) { cpu.step(); steps++; }
+  if (!cpu.halted) return { id, status: 'timeout', steps, packed: res.compressed.length };
+
+  // attrsModified packers (e.g. LgK optimizeAttrs) intentionally rewrite attributes,
+  // so the screen is NOT byte-identical by design — success = it ran to completion.
+  if (res.attrsModified) return { id, status: 'OK-ATTRS', steps, packed: res.compressed.length };
+
+  let diff = -1;
+  for (let i = 0; i < SCREEN_BYTES; i++) {
+    if (mem.ram[0x4000 + i] !== screen[i]) { diff = i; break; }
+  }
+  return { id, status: diff < 0 ? 'OK' : 'MISMATCH', diffAt: diff, steps, packed: res.compressed.length };
+}
+
+// ---------------------------------------------------------------------------
+(async () => {
+  // 1. Load the ZX-M8XXX assembler + Z80 core (dynamic so the path is configurable).
+  let Assembler, Z80;
+  try {
+    ({ Assembler } = await import(M8_BASE + 'sjasmplus/assembler.js'));
+    ({ Z80 } = await import(M8_BASE + 'core/z80.js'));
+  } catch (e) {
+    return fail('cannot load ZX-M8XXX from ' + M8_BASE + ' (' + (e && e.message || e) +
+                '). Clone https://github.com/Bedazzle/ZX-M8XXX or pass ?m8xxx=<url>.');
+  }
+
+  // 2. Wait for the comparison tool iframe (packers + depacker-ASM) to be ready.
+  const cc = document.getElementById('cc').contentWindow;
+  const t0 = Date.now();
+  while ((!cc.__packAndAsm || !cc.__asmInfoKeys) && Date.now() - t0 < 30000) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (!cc.__packAndAsm) return fail('compressors_compare.html iframe not ready');
+  const ids = cc.__asmInfoKeys();
+
+  // 3. Resolve the screen list (query param, else fixtures/manifest.json).
+  let screenList;
+  try {
+    if (params.get('screens')) {
+      screenList = JSON.parse(params.get('screens')).map(([n, u]) => [n, new URL(u, location.href).href]);
+    } else {
+      const man = await (await fetch('./fixtures/manifest.json')).json();
+      screenList = man.map(([n, f]) => [n, new URL('./fixtures/' + f, location.href).href]);
+    }
+  } catch (e) { return fail('cannot resolve screen list: ' + (e && e.message || e)); }
+
+  const screens = [];
+  for (const [name, url] of screenList) {
+    try { screens.push([name, await loadScreen(url)]); }
+    catch (e) { screens.push([name, null, String(e.message || e)]); }
+  }
+
+  // 4. Run every depacker against every screen.
+  const results = [];
+  const lines = [];
+  for (const [sname, sdata, serr] of screens) {
+    if (!sdata || sdata.length !== SCREEN_BYTES) {
+      results.push({ screen: sname, status: 'screen-error', detail: serr || ('len ' + (sdata ? sdata.length : '?')) });
+      lines.push('SCREEN ' + sname + ': LOAD ERROR (' + (serr || 'bad length') + ')');
+      continue;
+    }
+    lines.push('=== ' + sname + ' ===');
+    for (const id of ids) {
+      let r;
+      try { r = runOne(Assembler, Z80, cc, id, sdata); }
+      catch (e) { r = { id, status: 'harness-throw', detail: String(e && e.message || e) }; }
+      r.screen = sname;
+      results.push(r);
+      lines.push('  [' + r.status.toUpperCase().padEnd(13) + '] ' + id.padEnd(9) +
+                 (r.packed != null ? ' packed=' + String(r.packed).padStart(5) : '') +
+                 (r.diffAt != null && r.diffAt >= 0 ? ' diff@' + r.diffAt : '') +
+                 (r.detail ? ' ' + r.detail : ''));
+      out.innerHTML = lines.map(l =>
+        l.includes('[OK') ? '<span class="ok">' + l + '</span>'
+        : /\[(MISMATCH|ASSEMBLE|PACK|HARNESS|SCREEN)/.test(l) ? '<span class="bad">' + l + '</span>'
+        : /\[(TIMEOUT|NO-ASM)/.test(l) ? '<span class="warn">' + l + '</span>' : l).join('\n');
+      await new Promise(res => setTimeout(res, 0));
+    }
+  }
+
+  const total = results.filter(r => r.id).length;
+  const ok = results.filter(r => r.status === 'OK' || r.status === 'OK-ATTRS').length;
+  summary.textContent = 'DONE: ' + ok + '/' + total + ' OK  ' +
+    '(mismatch=' + results.filter(r => r.status === 'MISMATCH').length +
+    ', assemble-fail=' + results.filter(r => /assemble/.test(r.status)).length +
+    ', timeout=' + results.filter(r => r.status === 'timeout').length +
+    ', pack-error=' + results.filter(r => r.status === 'pack-error').length + ')';
+
+  out.textContent += '\n\nRESULT_START\n' + JSON.stringify(results) + '\nRESULT_END';
+})();
+</script>
+</body>
+</html>

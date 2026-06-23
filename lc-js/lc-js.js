@@ -1,3 +1,4 @@
+(function(){
 /*
  * Laser Compact 5.2.1 - JavaScript implementation
  *
@@ -5,7 +6,8 @@
  * PC version: Nikita Burnashev, 2005
  * Bug fixed, improved compression ratio, add depacker: Hrumer, 2014
  * Add -seg, -noattr options, fix buffer overflow: Eugene Larchenko, 2026
- * JavaScript port: Bedazzle, 2026
+ * JavaScript port by Bedazzle, 2026.
+ * License: BSD-3-Clause — see LICENSE file.
  */
 
 const MAX_OFFSET = 0x1700;
@@ -403,17 +405,19 @@ function decompressArray(inputArray) {
     return decompress(inputData);
 }
 
-if (typeof window !== 'undefined') {
-    window.LC = {
-        compress,
-        decompress,
-        reorder,
-        deorder,
-        compressScreen,
-        decompressScreen,
-        compressArray,
-        decompressArray,
-        MAX_OFFSET,
-        MAX_LEN
-    };
-}
+const LC = {
+    compress,
+    decompress,
+    reorder,
+    deorder,
+    compressScreen,
+    decompressScreen,
+    compressArray,
+    decompressArray,
+    MAX_OFFSET,
+    MAX_LEN
+};
+
+if (typeof window !== 'undefined') window.LC = LC;
+if (typeof module !== 'undefined' && module.exports) module.exports = LC;
+})();

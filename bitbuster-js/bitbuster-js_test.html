@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitBuster-JS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+        .box { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; border-radius: 4px; }
+        button { padding: 0.5rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+        .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+        .controls button, .controls input, .controls select { flex-shrink: 0; }
+        #result { display: none; margin-top: 1rem; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>BitBuster-JS</h1>
+
+    <div class="box">
+        <select id="mode" onchange="updateMode()">
+            <option value="compress">Compress (BitBuster 1.2)</option>
+            <option value="compress2">Compress (BitBuster 2)</option>
+            <option value="decompress">Decompress (BitBuster 1.2)</option>
+            <option value="decompress2">Decompress (BitBuster 2)</option>
+            <option value="batchCompress">Batch Compress (BitBuster 1.2)</option>
+            <option value="batchCompress2">Batch Compress (BitBuster 2)</option>
+            <option value="batchDecompress">Batch Decompress (BitBuster 1.2)</option>
+            <option value="batchDecompress2">Batch Decompress (BitBuster 2)</option>
+        </select><br>
+        <div class="controls">
+            <button id="selectBtn" onclick="document.getElementById('fileInput').click()">Select Files</button>
+            <input type="file" id="fileInput" style="display:none">
+            <span id="fileCount" style="flex:1"></span>
+        </div>
+        <div class="controls">
+            <label id="levelLabel">Level: <input type="number" id="level" value="5" min="1" max="9" style="width:50px"></label>
+        </div>
+        <div class="controls">
+            <button onclick="process()">Go</button>
+        </div>
+    </div>
+
+    <div id="result">
+        <p id="status"></p>
+        <p>Original: <span id="origSize">-</span> &rarr; Result: <span id="resultSize">-</span> (<span id="ratio">-</span>%)</p>
+        <p id="progress"></p>
+        <button onclick="download()">Download</button>
+    </div>
+
+    <script src="bitbuster-js.js"></script>
+    <script>
+        let lastResult = null;
+        let lastFilename = 'result.bin';
+        let batchZip = null;
+        let batchStartTime = 0;
+
+        const modeSelect = document.getElementById('mode');
+        const selectBtn = document.getElementById('selectBtn');
+        const fileInput = document.getElementById('fileInput');
+        const fileCount = document.getElementById('fileCount');
+
+        function isBB2Mode() {
+            return modeSelect.value.includes('2');
+        }
+
+        function isDecompressMode() {
+            return modeSelect.value.includes('ecompress');
+        }
+
+        function isBatchMode() {
+            return modeSelect.value.startsWith('batch');
+        }
+
+        function updateMode() {
+            if (isBatchMode()) {
+                selectBtn.textContent = 'Select Folder';
+                fileInput.webkitdirectory = true;
+                fileInput.removeAttribute('multiple');
+            } else {
+                selectBtn.textContent = 'Select Files';
+                fileInput.removeAttribute('webkitdirectory');
+                fileInput.multiple = true;
+            }
+            fileInput.value = '';
+            fileCount.textContent = '';
+            document.getElementById('levelLabel').style.display = isDecompressMode() ? 'none' : '';
+        }
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length === 1) {
+                fileCount.textContent = this.files[0].name;
+            } else if (this.files.length > 1) {
+                const firstFile = this.files[0];
+                const path = firstFile.webkitRelativePath || '';
+                const dirName = path.split('/')[0] || 'directory';
+                fileCount.textContent = dirName + ' (' + this.files.length + ' files)';
+            } else {
+                fileCount.textContent = '';
+            }
+        });
+
+        async function readFile(file) {
+            return new Uint8Array(await file.arrayBuffer());
+        }
+
+        async function process() {
+            batchZip = null;
+            lastResult = null;
+            const mode = modeSelect.value;
+            const files = fileInput.files;
+            const level = parseInt(document.getElementById('level').value) || 5;
+            const bb2 = isBB2Mode();
+
+            if (!files.length) return alert('Select file(s)');
+
+            try {
+                if (mode === 'compress' || mode === 'compress2') {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Compressing...';
+                    document.getElementById('status').className = '';
+                    const data = await readFile(files[0]);
+                    setTimeout(() => {
+                        try {
+                            const result = bb2 ? BitBuster.compress2(data, level) : BitBuster.compress(data, level);
+                            lastResult = result;
+                            lastFilename = files[0].name + (bb2 ? '.bb2' : '.pck');
+                            showResult(data.length, result.length);
+                        } catch (e) {
+                            showError(e.message);
+                        }
+                    }, 10);
+                } else if (mode === 'decompress' || mode === 'decompress2') {
+                    const data = await readFile(files[0]);
+                    const result = bb2 ? BitBuster.decompress2(data) : BitBuster.decompress(data);
+                    lastResult = result;
+                    lastFilename = files[0].name.replace(/\.(pck|bb2)$/, '');
+                    showResult(data.length, result.length);
+                } else if (isBatchMode()) {
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('status').textContent = 'Processing...';
+                    document.getElementById('status').className = '';
+                    const zip = new JSZip();
+                    batchStartTime = Date.now();
+                    if (isDecompressMode()) {
+                        processBatchDecompress(files, zip, bb2, 0);
+                    } else {
+                        processBatchCompress(files, zip, bb2, level, 0, []);
+                    }
+                    return;
+                }
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function processBatchCompress(files, zip, bb2, level, index, results) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length, results);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const result = bb2 ? BitBuster.compress2(data, level) : BitBuster.compress(data, level);
+                const name = files[index].name + (bb2 ? '.bb2' : '.pck');
+                zip.file(name, result);
+                results.push({ name: files[index].name, origSize: data.length, compSize: result.length });
+                setTimeout(() => processBatchCompress(files, zip, bb2, level, index + 1, results), 0);
+            });
+        }
+
+        function processBatchDecompress(files, zip, bb2, index) {
+            if (index >= files.length) {
+                batchZip = zip;
+                showBatch(files.length);
+                return;
+            }
+            document.getElementById('progress').textContent = `Processing: (${index+1}/${files.length}) ${files[index].name}`;
+            readFile(files[index]).then(data => {
+                const result = bb2 ? BitBuster.decompress2(data) : BitBuster.decompress(data);
+                zip.file(files[index].name.replace(/\.(pck|bb2)$/, ''), result);
+                setTimeout(() => processBatchDecompress(files, zip, bb2, index + 1), 0);
+            });
+        }
+
+        function showResult(orig, result) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Success!';
+            document.getElementById('origSize').textContent = orig;
+            document.getElementById('resultSize').textContent = result;
+            document.getElementById('ratio').textContent = ((result / orig) * 100).toFixed(1);
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showError(msg) {
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'error';
+            document.getElementById('status').textContent = 'Error: ' + msg;
+            document.getElementById('progress').textContent = '';
+        }
+
+        function showBatch(count, results) {
+            const elapsed = ((Date.now() - batchStartTime) / 1000).toFixed(1);
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('status').className = 'success';
+            document.getElementById('status').textContent = 'Done! ' + count + ' files (' + elapsed + 's)';
+
+            if (results && results.length > 0) {
+                let totalOrig = 0, totalComp = 0;
+                for (const r of results) {
+                    totalOrig += r.origSize;
+                    totalComp += r.compSize;
+                }
+                document.getElementById('progress').innerHTML =
+                    `Total: ${totalOrig} &rarr; ${totalComp} (${((totalComp / totalOrig) * 100).toFixed(1)}%)`;
+            } else {
+                document.getElementById('progress').textContent = '';
+            }
+
+            document.getElementById('origSize').textContent = '-';
+            document.getElementById('resultSize').textContent = '-';
+            document.getElementById('ratio').textContent = '-';
+        }
+
+        function download() {
+            const a = document.createElement('a');
+            if (batchZip) {
+                batchZip.generateAsync({ type: 'blob' }).then(blob => {
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'bitbuster_results.zip';
+                    a.click();
+                });
+            } else if (lastResult) {
+                a.href = URL.createObjectURL(new Blob([lastResult]));
+                a.download = lastFilename;
+                a.click();
+            }
+        }
+
+        updateMode();
+    </script>
+</body>
+</html>

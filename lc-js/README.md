@@ -1,6 +1,6 @@
 # LC-JS - Laser Compact 5.2.1 Compression
 
-JavaScript implementation of the Laser Compact 5.2.1 compression algorithm, originally developed by Hrumer (1994-1999), PC version by Nikita Burnashev (2005), improved by Hrumer (2014) and Eugene Larchenko (2026).
+Pure-JavaScript port by Bedazzle (2026) of **Laser Compact 5.2.1**, the optimal LZH compression algorithm by Hrumer (1994-1999, 2014), with PC version by Nikita Burnashev (2005) and improvements by Eugene Larchenko (2026).
 
 ## About
 
@@ -69,7 +69,7 @@ These handle the full pipeline: pixel reordering + compression + LCMP5 header.
 | Function | Parameters | Returns |
 |----------|------------|---------|
 | `LC.compressScreen(data, options)` | data: Uint8Array, options: object | `{data}` |
-| `LC.decompressScreen(data, options)` | data: Uint8Array, options: object | Uint8Array (6912 bytes) |
+| `LC.decompressScreen(data, options)` | data: Uint8Array, options: object | Uint8Array (6912 bytes for a full screen; fewer for a partial `start`/`end` segment) |
 
 #### Screen Options
 
