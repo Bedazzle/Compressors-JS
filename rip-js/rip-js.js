@@ -145,9 +145,13 @@ function decodeSymbol(br, dt) {
     var savedBuf = br.buf;
     var savedPos = br.pos;
 
-    // Read maxLen bits (LSB-first)
+    // Read up to maxLen bits (LSB-first) for the table lookup. Past the end of the
+    // stream the final byte is only zero-padded to a byte boundary, so treat missing
+    // lookahead bits as 0 instead of overrunning — the real symbol code (len bits) is
+    // always present, only the speculative extra bits can fall off the end.
     var val = 0;
     for (var i = 0; i < dt.maxLen; i++) {
+        if (br.buf <= 1 && br.pos >= br.data.length) break; // remaining lookahead bits are 0
         val |= br.readBit() << i;
     }
 

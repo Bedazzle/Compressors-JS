@@ -21,6 +21,7 @@ Pure JavaScript implementations of compression algorithms commonly used on retro
 | [rip](rip-js/) | LZ77 with canonical Huffman coding (RIP 0.2x + mRIP) | Roman Petrov (Mesur'a) | BSD-3-Clause |
 | [bitbuster](bitbuster-js/) | LZ77 with Elias gamma coding (BitBuster 1.2 + 2) | Arjan Bakker (Team Bomba) | MIT |
 | [rcs](rcs-js/) | ZX Spectrum screen reorder transform (pairs with ZX0/ZX7) | Einar Saukas | BSD-3-Clause |
+| [asc](asc-js/) | LZSS + RLE screen compressor with 8×8-cell reorder (ASC v2.9) | Andrew Strikes Code (Andrey Sendetsky) | MIT |
 
 ## Overview
 
@@ -100,6 +101,20 @@ LZ77 compressor with Elias gamma coding (BitBuster 1.2 + BitBuster 2) by Arjan B
 Re-ordered Compressed Screen transform by Einar Saukas. RCS is **not a compressor itself** — it rearranges the 6144 bitmap bytes of a ZX Spectrum `SCR` screen (the 768 attribute bytes are left unchanged) into S→C→R→L order, exposing longer matches so the screen compresses roughly **10% smaller** with ZX0 or ZX7. RCS defines no file format or header; the reordered 6912-byte buffer is simply fed to a standard ZX0/ZX7 compressor. On Z80, the "smart" depackers (`dzx0_smartRCS` / `dzx7_smartRCS`) fuse decompression with the un-reorder in a single pass. This port pairs RCS with the `zx0-js`/`zx7-js` codecs (forward and backwards) and is roundtrip-verifiable in JavaScript. Transform ported from the SpectraLab project.
 
 - Original: https://github.com/einar-saukas/RCS
+
+### ASC
+
+LZSS + RLE screen compressor by Andrew Strikes Code (Andrey Sendetsky), ASC v2.9, 1997.
+Compresses a standard
+6912-byte ZX Spectrum screen into a **self-extracting block** — a 194-byte depacker stub
+followed by an LZSS/RLE token stream — so a compressed screen unpacks itself. Before
+matching, the bitmap is reordered into 8×8-character-cell order (de-interleaving the
+Spectrum's display layout) so each cell's 8 pixel rows become contiguous, exposing runs and
+matches that the interleaved layout would hide; the 768 attribute bytes are appended
+unchanged. Matches are length 3–18 / offset 1–2047, with RLE runs (3–66) and literal runs
+(1–63). Compression levels 1–9 (greedy / lazy / cost-optimal DP). Output is byte-compatible
+with the original ASC v2.9 depacker, and the port also decompresses ASC-made blocks. Format
+reconstructed from a byte-exact disassembly.
 
 ## Common Features
 
